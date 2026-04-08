@@ -1,5 +1,6 @@
 mod commands;
 mod events;
+mod highlight;
 mod history;
 mod input_box;
 mod keys;

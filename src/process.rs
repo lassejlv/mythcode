@@ -53,6 +53,11 @@ impl AcpProcess {
                 ],
                 "claude-acp",
             ),
+            AcpProvider::Pi => (
+                "npx".to_string(),
+                vec!["-y".to_string(), "pi-acp".to_string()],
+                "pi-acp",
+            ),
         };
 
         let mut command = Command::new(&program);
@@ -146,6 +151,7 @@ impl AcpProcess {
             AcpProvider::OpenCode => "opencode acp",
             AcpProvider::Codex => "codex-acp",
             AcpProvider::Claude => "claude-acp",
+            AcpProvider::Pi => "pi-acp",
         };
         let tail = self.stderr_tail.lock().await;
         if tail.is_empty() {

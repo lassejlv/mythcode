@@ -8,6 +8,7 @@ use super::history::{
     format_activity, format_diff, format_plan, format_status, format_tool_output,
     format_warning, LineType,
 };
+use super::markdown::wrap_ansi;
 use super::permission::PendingPermission;
 use super::{C_DARK, C_DIM, C_RESET, Tui};
 
@@ -143,10 +144,13 @@ impl Tui {
     // ── Streaming buffer management ─────────────────────────────────
 
     pub(super) fn flush_complete_assistant_lines(&mut self) {
+        let w = self.term_width as usize;
         while let Some(newline_pos) = self.assistant_buffer.find('\n') {
             let line = self.assistant_buffer[..newline_pos].to_string();
             let rendered = self.md_parser.render_line(&line);
-            self.history.push(rendered, LineType::Assistant);
+            for wrapped in wrap_ansi(&rendered, w) {
+                self.history.push(wrapped, LineType::Assistant);
+            }
             self.assistant_buffer = self.assistant_buffer[newline_pos + 1..].to_string();
         }
         self.partial_line = if self.assistant_buffer.is_empty() {
@@ -157,10 +161,13 @@ impl Tui {
     }
 
     pub(super) fn flush_complete_thinking_lines(&mut self) {
+        let w = self.term_width as usize;
         while let Some(newline_pos) = self.thinking_buffer.find('\n') {
             let line = self.thinking_buffer[..newline_pos].to_string();
             let rendered = self.md_parser.render_thinking_line(&line);
-            self.history.push(rendered, LineType::Thinking);
+            for wrapped in wrap_ansi(&rendered, w) {
+                self.history.push(wrapped, LineType::Thinking);
+            }
             self.thinking_buffer = self.thinking_buffer[newline_pos + 1..].to_string();
         }
         self.thinking_partial = if self.thinking_buffer.is_empty() {
@@ -172,9 +179,12 @@ impl Tui {
 
     pub(super) fn flush_assistant(&mut self) {
         if !self.assistant_buffer.is_empty() {
+            let w = self.term_width as usize;
             let line = std::mem::take(&mut self.assistant_buffer);
             let rendered = self.md_parser.render_line(&line);
-            self.history.push(rendered, LineType::Assistant);
+            for wrapped in wrap_ansi(&rendered, w) {
+                self.history.push(wrapped, LineType::Assistant);
+            }
             self.partial_line = None;
         }
         self.assistant_open = false;
@@ -182,9 +192,12 @@ impl Tui {
 
     pub(super) fn flush_thinking(&mut self) {
         if !self.thinking_buffer.is_empty() {
+            let w = self.term_width as usize;
             let line = std::mem::take(&mut self.thinking_buffer);
             let rendered = self.md_parser.render_thinking_line(&line);
-            self.history.push(rendered, LineType::Thinking);
+            for wrapped in wrap_ansi(&rendered, w) {
+                self.history.push(wrapped, LineType::Thinking);
+            }
             self.thinking_partial = None;
         }
         self.thinking_open = false;

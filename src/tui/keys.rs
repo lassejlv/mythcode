@@ -7,6 +7,7 @@ use crate::acp_client::AcpClient;
 use crate::input::FileIndex;
 use crate::types::PermissionDecision;
 
+use super::highlight;
 use super::history::{format_status, LineType};
 use super::select::SelectKind;
 use super::{C_DIM, C_RESET, KeyAction, Tui};
@@ -234,16 +235,19 @@ impl Tui {
                 self.input.clear();
             }
             KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                // Expand last tool output fully
+                // Expand last tool output fully with syntax highlighting
                 if let Some(output) = self.last_tool_outputs.last() {
+                    let filename = highlight::extract_filename(&output.title);
+                    let highlighted = highlight::highlight_content(&output.content, filename);
+
                     self.history.push(String::new(), LineType::Status);
                     self.history.push(
                         format!("  {C_DIM}── {} ({} lines) ──{C_RESET}", output.title, output.total_lines),
                         LineType::Status,
                     );
-                    for line in output.content.lines() {
+                    for hl_line in &highlighted {
                         self.history.push(
-                            format!("  {C_DIM}│{C_RESET} \x1b[38;5;245m{line}\x1b[0m"),
+                            format!("  {C_DIM}│{C_RESET} {hl_line}"),
                             LineType::Activity,
                         );
                     }

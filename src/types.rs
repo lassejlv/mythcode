@@ -18,6 +18,7 @@ pub enum AcpProvider {
     OpenCode,
     Codex,
     Claude,
+    Pi,
 }
 
 impl std::fmt::Display for AcpProvider {
@@ -26,6 +27,7 @@ impl std::fmt::Display for AcpProvider {
             Self::OpenCode => write!(f, "opencode"),
             Self::Codex => write!(f, "codex"),
             Self::Claude => write!(f, "claude"),
+            Self::Pi => write!(f, "pi"),
         }
     }
 }

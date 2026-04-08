@@ -42,8 +42,9 @@ pub async fn run() -> Result<()> {
         Some("opencode") => AcpProvider::OpenCode,
         Some("codex") => AcpProvider::Codex,
         Some("claude") => AcpProvider::Claude,
+        Some("pi") => AcpProvider::Pi,
         Some(other) => {
-            anyhow::bail!("unknown provider `{other}`. Use `opencode`, `codex`, or `claude`.");
+            anyhow::bail!("unknown provider `{other}`. Use `opencode`, `codex`, `claude`, or `pi`.");
         }
         None if input::is_interactive_terminal() => pick_provider()?,
         None => AcpProvider::OpenCode,
@@ -263,6 +264,7 @@ fn pick_provider() -> Result<AcpProvider> {
         (AcpProvider::OpenCode, "opencode", "OpenCode ACP server"),
         (AcpProvider::Codex, "codex", "Codex ACP (Zed)"),
         (AcpProvider::Claude, "claude", "Claude Code ACP"),
+        (AcpProvider::Pi, "pi", "Pi ACP"),
     ];
 
     let mut selected = 0usize;

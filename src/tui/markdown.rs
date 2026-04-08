@@ -2,6 +2,8 @@
 /// Handles: **bold**, *italic*, `inline code`, # headers, - lists, fenced code blocks.
 /// Uses 256-color ANSI for a muted, clean palette.
 
+use unicode_width::UnicodeWidthChar;
+
 // Claude Code-inspired palette
 const C_RESET: &str = "\x1b[0m";
 const C_BOLD: &str = "\x1b[1m";             // terminal default bold white
@@ -167,4 +169,129 @@ fn find_closing_single(chars: &[char], start: usize, ch: char) -> Option<usize> 
         }
     }
     None
+}
+
+/// Wrap a rendered ANSI line to fit within `width` columns.
+/// Returns one or more lines; continuation lines get the same indent.
+pub fn wrap_ansi(line: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![line.to_string()];
+    }
+
+    // Measure the visible indent (leading spaces) to replicate on wrapped lines.
+    let indent = visible_indent(line);
+    let indent_str: String = " ".repeat(indent);
+
+    // Split into segments: either ANSI escapes (zero-width) or visible chars.
+    let segments = parse_segments(line);
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut col: usize = 0;
+    // Track active ANSI state so we can re-apply on continuation lines.
+    let mut active_ansi: Vec<String> = Vec::new();
+
+    for seg in &segments {
+        match seg {
+            Segment::Ansi(code) => {
+                cur.push_str(code);
+                // Track active styling so we can replay on wrapped lines
+                if code.contains("[0m") || code.contains("[0;") {
+                    active_ansi.clear();
+                } else {
+                    active_ansi.push(code.clone());
+                }
+            }
+            Segment::Text(text) => {
+                for ch in text.chars() {
+                    let ch_w = ch.width().unwrap_or(0);
+                    if ch == ' ' && col + ch_w > width {
+                        // Break at this space
+                        cur.push_str(C_RESET);
+                        lines.push(cur);
+                        cur = format!("{indent_str}{}", active_ansi.join(""));
+                        col = indent;
+                        continue;
+                    }
+                    if col + ch_w > width && col > indent {
+                        // Hard break mid-word
+                        cur.push_str(C_RESET);
+                        lines.push(cur);
+                        cur = format!("{indent_str}{}", active_ansi.join(""));
+                        col = indent;
+                    }
+                    cur.push(ch);
+                    col += ch_w;
+                }
+            }
+        }
+    }
+
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+/// Count visible leading spaces in an ANSI string.
+fn visible_indent(s: &str) -> usize {
+    let mut count = 0;
+    let mut in_esc = false;
+    for ch in s.chars() {
+        if in_esc {
+            if ch.is_ascii_alphabetic() {
+                in_esc = false;
+            }
+            continue;
+        }
+        if ch == '\x1b' {
+            in_esc = true;
+            continue;
+        }
+        if ch == ' ' {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+    count
+}
+
+enum Segment {
+    Ansi(String),
+    Text(String),
+}
+
+/// Parse a string into ANSI escape sequences and visible text segments.
+fn parse_segments(s: &str) -> Vec<Segment> {
+    let mut segments = Vec::new();
+    let mut chars = s.chars().peekable();
+    let mut text_buf = String::new();
+
+    while let Some(&ch) = chars.peek() {
+        if ch == '\x1b' {
+            // Flush text
+            if !text_buf.is_empty() {
+                segments.push(Segment::Text(std::mem::take(&mut text_buf)));
+            }
+            let mut esc = String::new();
+            esc.push(chars.next().unwrap()); // \x1b
+            while let Some(&next) = chars.peek() {
+                esc.push(chars.next().unwrap());
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            segments.push(Segment::Ansi(esc));
+        } else {
+            text_buf.push(chars.next().unwrap());
+        }
+    }
+    if !text_buf.is_empty() {
+        segments.push(Segment::Text(text_buf));
+    }
+    segments
 }

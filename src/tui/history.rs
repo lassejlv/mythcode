@@ -1,5 +1,8 @@
+use std::path::Path;
+
 use similar::{ChangeTag, TextDiff};
 
+use super::highlight::{self, Highlighter};
 use crate::types::{DiffPreview, PlanEntryStatus, PlanView};
 
 // Claude Code-inspired palette
@@ -117,7 +120,7 @@ pub fn format_status(message: &str) -> String {
 /// Max lines to show for tool output preview
 const TOOL_OUTPUT_MAX_LINES: usize = 4;
 
-/// Format tool output with truncation
+/// Format tool output with truncation and syntax highlighting
 pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec<String> {
     let mut lines = Vec::new();
 
@@ -130,9 +133,20 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
     let shown = preview_lines.len();
 
     if shown > 0 {
+        let filename = highlight::extract_filename(title);
+        let ext = Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        let mut hl = Highlighter::new(ext);
+
         lines.push(format!("    {C_DARK}╭─{C_RESET}"));
         for line in &preview_lines {
-            lines.push(format!("    {C_DARK}│{C_RESET} {C_DARK}{line}{C_RESET}"));
+            let colored = hl
+                .as_mut()
+                .and_then(|h| h.highlight_line(line))
+                .unwrap_or_else(|| format!("{C_DARK}{line}{C_RESET}"));
+            lines.push(format!("    {C_DARK}│{C_RESET} {colored}"));
         }
         if total_lines > shown {
             let remaining = total_lines - shown;
@@ -163,13 +177,21 @@ pub fn format_plan(plan: &PlanView) -> Vec<String> {
     lines
 }
 
-/// Format a diff — clean Claude Code style
+/// Format a diff — clean Claude Code style with syntax highlighting
 pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
     let mut lines = Vec::new();
     let path_display = diff.path.display();
     let old_text = diff.old_text.as_deref().unwrap_or("");
     let text_diff = TextDiff::from_lines(old_text, &diff.new_text);
     let groups = text_diff.grouped_ops(3);
+
+    // Set up syntax highlighter based on file extension
+    let ext = diff
+        .path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    let mut hl = Highlighter::new(ext);
 
     // Count insertions and deletions
     let mut insertions = 0usize;
@@ -233,13 +255,21 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                         )
                     }
                     ChangeTag::Insert => {
+                        let highlighted = hl
+                            .as_mut()
+                            .and_then(|h| h.highlight_line(change_trimmed))
+                            .unwrap_or_else(|| format!("{C_GREEN}{change_trimmed}{C_RESET}"));
                         format!(
-                            "    {C_LINE_NO}{line_no}{C_RESET} {C_GREEN}+ {change_trimmed}{C_RESET}"
+                            "    {C_LINE_NO}{line_no}{C_RESET} {C_GREEN}+ {C_RESET}{highlighted}"
                         )
                     }
                     ChangeTag::Equal => {
+                        let highlighted = hl
+                            .as_mut()
+                            .and_then(|h| h.highlight_line(change_trimmed))
+                            .unwrap_or_else(|| format!("{C_DARK}{change_trimmed}{C_RESET}"));
                         format!(
-                            "    {C_LINE_NO}{line_no}{C_RESET}   {C_DARK}{change_trimmed}{C_RESET}"
+                            "    {C_LINE_NO}{line_no}{C_RESET}   {highlighted}"
                         )
                     }
                 };
