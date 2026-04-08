@@ -9,11 +9,12 @@ use crate::acp_client::AcpClient;
 use crate::input::{self, FileIndex};
 use crate::tui::Tui;
 use crate::types::{
-    AppConfig, AppEvent, PermissionDecision, ShutdownSignal, SlashCommand, SlashCommandSource,
+    AcpProvider, AppConfig, AppEvent, PermissionDecision, ShutdownSignal, SlashCommand,
+    SlashCommandSource,
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "mythcode", version, about = "Minimal ACP client for OpenCode")]
+#[command(name = "mythcode", version, about = "Minimal ACP client")]
 struct Args {
     #[arg(value_name = "PROMPT", trailing_var_arg = true)]
     prompt: Vec<String>,
@@ -21,6 +22,9 @@ struct Args {
     project: Option<PathBuf>,
     #[arg(long, value_name = "MODEL")]
     model: Option<String>,
+    /// ACP provider: opencode or codex (interactive selection if omitted)
+    #[arg(long, value_name = "PROVIDER")]
+    provider: Option<String>,
     #[arg(long)]
     debug: bool,
 }
@@ -33,11 +37,24 @@ pub async fn run() -> Result<()> {
     } else {
         Some(args.prompt.join(" "))
     };
+
+    let provider = match args.provider.as_deref() {
+        Some("opencode") => AcpProvider::OpenCode,
+        Some("codex") => AcpProvider::Codex,
+        Some("claude") => AcpProvider::Claude,
+        Some(other) => {
+            anyhow::bail!("unknown provider `{other}`. Use `opencode`, `codex`, or `claude`.");
+        }
+        None if input::is_interactive_terminal() => pick_provider()?,
+        None => AcpProvider::OpenCode,
+    };
+
     let config = AppConfig {
         cwd,
         debug: args.debug,
         model: args.model,
         prompt,
+        provider,
     };
 
     let local = tokio::task::LocalSet::new();
@@ -236,6 +253,73 @@ fn local_command(name: &str, description: &str, hint: Option<&str>) -> SlashComm
 
 pub fn build_file_index(cwd: &Path) -> FileIndex {
     FileIndex::build(cwd).unwrap_or_default()
+}
+
+fn pick_provider() -> Result<AcpProvider> {
+    use crossterm::event::{self, Event, KeyCode};
+    use crossterm::{cursor, execute, terminal};
+
+    let providers = [
+        (AcpProvider::OpenCode, "opencode", "OpenCode ACP server"),
+        (AcpProvider::Codex, "codex", "Codex ACP (Zed)"),
+        (AcpProvider::Claude, "claude", "Claude Code ACP"),
+    ];
+
+    let mut selected = 0usize;
+    let mut stdout = io::stdout();
+
+    terminal::enable_raw_mode()?;
+
+    loop {
+        // Draw menu
+        execute!(stdout, cursor::MoveTo(0, 0))?;
+        write!(stdout, "\x1b[2J\x1b[H")?; // clear screen
+        writeln!(stdout, "\r")?;
+        writeln!(stdout, "  \x1b[1;38;5;75mmythcode\x1b[0m\r")?;
+        writeln!(stdout, "  \x1b[38;5;245mSelect an ACP provider:\x1b[0m\r")?;
+        writeln!(stdout, "\r")?;
+
+        for (i, (_, name, desc)) in providers.iter().enumerate() {
+            if i == selected {
+                writeln!(stdout, "  \x1b[38;5;75m▸ {name}\x1b[0m  \x1b[38;5;245m{desc}\x1b[0m\r")?;
+            } else {
+                writeln!(stdout, "    \x1b[38;5;240m{name}  {desc}\x1b[0m\r")?;
+            }
+        }
+
+        writeln!(stdout, "\r")?;
+        writeln!(stdout, "  \x1b[38;5;240m↑↓ select · enter confirm · q quit\x1b[0m\r")?;
+        stdout.flush()?;
+
+        // Read key
+        if let Event::Key(key) = event::read()? {
+            match key.code {
+                KeyCode::Up => {
+                    if selected > 0 {
+                        selected -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if selected + 1 < providers.len() {
+                        selected += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    terminal::disable_raw_mode()?;
+                    write!(stdout, "\x1b[2J\x1b[H")?; // clear screen
+                    stdout.flush()?;
+                    return Ok(providers[selected].0.clone());
+                }
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    terminal::disable_raw_mode()?;
+                    write!(stdout, "\x1b[2J\x1b[H")?;
+                    stdout.flush()?;
+                    std::process::exit(0);
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 fn resolve_cwd(project: Option<PathBuf>) -> Result<PathBuf> {

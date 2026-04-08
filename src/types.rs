@@ -10,6 +10,24 @@ pub struct AppConfig {
     pub debug: bool,
     pub model: Option<String>,
     pub prompt: Option<String>,
+    pub provider: AcpProvider,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AcpProvider {
+    OpenCode,
+    Codex,
+    Claude,
+}
+
+impl std::fmt::Display for AcpProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OpenCode => write!(f, "opencode"),
+            Self::Codex => write!(f, "codex"),
+            Self::Claude => write!(f, "claude"),
+        }
+    }
 }
 
 #[derive(Debug)]

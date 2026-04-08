@@ -7,7 +7,7 @@ use agent_client_protocol::{self as acp, Agent as _};
 use anyhow::{Context, Result, anyhow};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::process::OpenCodeProcess;
+use crate::process::AcpProcess;
 use crate::session::SessionState;
 use crate::types::{
     AppConfig, AppEvent, DiffPreview, PermissionDecision, PermissionOptionKindView,
@@ -17,7 +17,7 @@ use crate::types::{
 
 pub struct AcpClient {
     conn: acp::ClientSideConnection,
-    process: OpenCodeProcess,
+    process: AcpProcess,
     state: Rc<RefCell<SessionState>>,
     turn_cancelled: Rc<Cell<bool>>,
     event_tx: mpsc::UnboundedSender<AppEvent>,
@@ -39,7 +39,7 @@ struct ClientHandler {
 impl AcpClient {
     pub async fn connect(config: &AppConfig) -> Result<ConnectedClient> {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let (process, transport) = OpenCodeProcess::spawn(config, event_tx.clone()).await?;
+        let (process, transport) = AcpProcess::spawn(config, event_tx.clone()).await?;
         let turn_cancelled = Rc::new(Cell::new(false));
         let tool_calls = Rc::new(RefCell::new(HashMap::new()));
 
@@ -282,7 +282,7 @@ pub struct SessionListItem {
 
 async fn new_session_inner(
     conn: &acp::ClientSideConnection,
-    process: &OpenCodeProcess,
+    process: &AcpProcess,
     event_tx: &mpsc::UnboundedSender<AppEvent>,
     cwd: &Path,
     model: Option<&str>,
@@ -357,7 +357,7 @@ async fn set_model_inner(
 
 async fn attach_startup_context(
     error: acp::Error,
-    process: &OpenCodeProcess,
+    process: &AcpProcess,
     cwd: &Path,
 ) -> anyhow::Error {
     match process.try_wait().await {
