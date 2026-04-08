@@ -1,6 +1,6 @@
 # Myth Code
 
-mythcodemal Rust CLI that talks to AI-agents over ACP.
+A Rust CLI that talks to AI-agents over ACP.
 
 Currently only supports opencode. More to come.
 
