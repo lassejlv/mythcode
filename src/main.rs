@@ -4,7 +4,6 @@ mod input;
 mod process;
 mod render;
 mod session;
-mod tui;
 mod types;
 
 #[tokio::main(flavor = "current_thread")]
