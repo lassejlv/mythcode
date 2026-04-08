@@ -6,16 +6,21 @@ use clap::Parser;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::acp_client::AcpClient;
-use crate::input::{self, FileIndex, ReadLineOutcome};
+use crate::input::{self, FileIndex};
 use crate::render::Renderer;
 use crate::session::SessionState;
+use crate::tui;
 use crate::types::{
     AppConfig, AppEvent, CommandAction, PermissionDecision, PermissionOptionView, PromptOutcome,
     ShutdownSignal, SlashCommand, SlashCommandSource,
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "mini-code", version, about = "Minimal ACP client for OpenCode")]
+#[command(
+    name = "mythcode-code",
+    version,
+    about = "mythcodemal ACP client for OpenCode"
+)]
 struct Args {
     #[arg(value_name = "PROMPT", trailing_var_arg = true)]
     prompt: Vec<String>,
@@ -45,8 +50,7 @@ pub async fn run() -> Result<()> {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let use_color =
-                input::is_interactive_terminal() && std::env::var("NO_COLOR").is_err();
+            let use_color = input::is_interactive_terminal() && std::env::var("NO_COLOR").is_err();
 
             let connected = AcpClient::connect(&config).await?;
             let mut client = connected.client;
@@ -57,7 +61,7 @@ pub async fn run() -> Result<()> {
             let result = if let Some(prompt) = &config.prompt {
                 run_one_shot(&client, &mut events, &mut renderer, &mut signals, prompt).await
             } else {
-                run_repl(&mut client, &mut events, &mut renderer, &mut signals, use_color).await
+                run_repl(&mut client, &mut events, &mut renderer, &mut signals).await
             };
 
             client.shutdown().await;
@@ -83,87 +87,12 @@ async fn run_repl(
     events: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
     renderer: &mut Renderer,
     signals: &mut SignalState,
-    use_color: bool,
 ) -> Result<()> {
-    let mut pending_exit = false;
-    let mut file_index = build_file_index(client.session_snapshot().cwd(), renderer);
-
     if input::is_interactive_terminal() {
-        input::init_theme();
-
-        let session = client.session_snapshot();
-        let project_name = session
-            .cwd()
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(".");
-        let model_name = session
-            .models()
-            .current_model_id
-            .as_deref()
-            .or_else(|| {
-                session
-                    .models()
-                    .available
-                    .first()
-                    .map(|m| m.name.as_str())
-            });
-        renderer.print_welcome(project_name, model_name);
-
-        loop {
-            let session = client.session_snapshot();
-            let prompt = prompt_label(session.cwd(), use_color);
-            let commands = prompt_commands(&session);
-
-            let input = match input::read_line(&prompt, &commands, &file_index)? {
-                ReadLineOutcome::Input(line) => {
-                    pending_exit = false;
-                    line
-                }
-                ReadLineOutcome::Interrupt => {
-                    if pending_exit {
-                        println!();
-                        break;
-                    }
-                    if use_color {
-                        println!("\n  \x1b[2mpress ctrl+c again to exit\x1b[0m");
-                    } else {
-                        println!("\n  Press Ctrl+C again to exit.");
-                    }
-                    pending_exit = true;
-                    continue;
-                }
-                ReadLineOutcome::EndOfFile => {
-                    println!();
-                    break;
-                }
-            };
-
-            let line = input.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            if let Some(action) =
-                handle_local_command(client, renderer, &mut file_index, line).await?
-            {
-                match action {
-                    CommandAction::Continue => continue,
-                    CommandAction::Exit => break,
-                }
-            }
-
-            if matches!(
-                run_prompt(client, events, renderer, signals, line).await?,
-                PromptOutcome::ExitRequested
-            ) {
-                break;
-            }
-        }
-
-        return Ok(());
+        return tui::run_repl(client, events, signals).await;
     }
 
+    let mut file_index = build_file_index(client.session_snapshot().cwd(), renderer);
     let stdin = tokio::io::stdin();
     let mut lines = BufReader::new(stdin).lines();
     loop {
@@ -353,7 +282,7 @@ fn local_commands() -> Vec<SlashCommand> {
         local_command("new", "start a fresh session", None),
         local_command("cwd", "print the current working directory", None),
         local_command("clear", "clear the terminal", None),
-        local_command("exit", "exit mini-code", None),
+        local_command("exit", "exit mythcode-code", None),
     ]
 }
 
@@ -425,13 +354,13 @@ fn print_prompt(cwd: &Path) -> Result<()> {
     io::stdout().flush().context("failed to flush prompt")
 }
 
-struct SignalState {
+pub(crate) struct SignalState {
     sigint: Option<tokio::signal::unix::Signal>,
     sigterm: Option<tokio::signal::unix::Signal>,
 }
 
 impl SignalState {
-    fn new() -> Result<Self> {
+    pub(crate) fn new() -> Result<Self> {
         #[cfg(unix)]
         {
             Ok(Self {
@@ -455,7 +384,7 @@ impl SignalState {
         }
     }
 
-    async fn recv(&mut self) -> ShutdownSignal {
+    pub(crate) async fn recv(&mut self) -> ShutdownSignal {
         #[cfg(unix)]
         {
             tokio::select! {

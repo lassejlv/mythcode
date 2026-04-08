@@ -95,7 +95,7 @@ impl AcpClient {
 
         let initialize = acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_info(
             acp::Implementation::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
-                .title("mini-code"),
+                .title("mythcode-code"),
         );
 
         if let Err(error) = conn.initialize(initialize).await {
@@ -141,6 +141,10 @@ impl AcpClient {
         Ok(PromptResult {
             stop_reason: response.stop_reason,
         })
+    }
+
+    pub async fn prompt_owned(&self, prompt: String) -> Result<PromptResult> {
+        self.prompt(&prompt).await
     }
 
     pub async fn cancel_current_turn(&self) -> Result<()> {
