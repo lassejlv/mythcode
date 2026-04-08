@@ -1,22 +1,35 @@
 # Mythcode
 
-> A lightweight Rust CLI for interacting with AI coding agents via ACP (Agent Client Protocol).
+> A fast Rust CLI for talking to ACP-compatible coding agents from your terminal.
 
-Currently supports [opencode](https://github.com/anomalyco/opencode).
+Mythcode gives you a lightweight local client for agent workflows without dragging you into a heavy editor integration. It supports interactive chat, one-shot prompts, project-scoped sessions, and a terminal UI that renders markdown, diffs, plans, tool output, and permission prompts cleanly.
 
-## Features
+## What It Supports
 
-- **Interactive REPL** — Chat with AI agents in real-time
-- **One-shot mode** — Run single prompts from the command line
-- **Project context** — Automatically include project files in context
-- **Rich TUI** — Terminal UI with markdown rendering, syntax highlighting, and history
-- **Tab completion** — Insert suggestions with Tab
-- **Keyboard shortcuts** — Cancel with `Ctrl+C`, use `/` for commands, `@` for file mentions
+- Interactive TUI for back-and-forth agent sessions
+- One-shot prompt mode for quick commands
+- Project-scoped sessions with file indexing
+- ACP providers: `opencode`, `codex`, `claude`, and `pi`
+- Markdown rendering with ANSI-aware wrapping
+- Syntax-highlighted diffs and tool output previews
+- Session resume support
+- Model switching and mode switching from inside the TUI
+- File mentions with `@`
+- Slash commands for common local actions
 
 ## Requirements
 
-- Rust stable
-- [opencode](https://github.com/anomalyco/opencode) installed and in `PATH`
+- Rust stable toolchain
+- A working ACP provider
+
+Provider setup:
+
+- `opencode`: install [`opencode`](https://github.com/anomalyco/opencode) and make sure `opencode` is in your `PATH`
+- `codex`: Mythcode launches `npx -y @zed-industries/codex-acp`
+- `claude`: Mythcode launches `npx -y @agentclientprotocol/claude-agent-acp`
+- `pi`: Mythcode launches `npx -y pi-acp`
+
+If you use `codex`, `claude`, or `pi`, you need a working `npx` environment available in your shell.
 
 ## Installation
 
@@ -24,64 +37,139 @@ Currently supports [opencode](https://github.com/anomalyco/opencode).
 cargo build --release
 ```
 
-The binary will be at `target/release/mythcode`. Add it to your PATH for convenience.
+The compiled binary will be at `target/release/mythcode`.
+
+If you want it globally available:
+
+```bash
+cargo install --path .
+```
 
 ## Quick Start
 
+Interactive mode:
+
 ```bash
-# Interactive REPL
 mythcode
+```
 
-# One-shot prompt
-mythcode "explain this code"
+One-shot prompt:
 
-# Run against a specific project
-mythcode -p ./my-project "fix the tests"
+```bash
+mythcode "explain this codebase"
+```
+
+Target a specific project:
+
+```bash
+mythcode --project ./my-project "fix the failing tests"
+```
+
+Pick a provider explicitly:
+
+```bash
+mythcode --provider codex
+mythcode --provider claude
+mythcode --provider opencode
+mythcode --provider pi
+```
+
+Choose a model up front:
+
+```bash
+mythcode --provider codex --model gpt-5.4
 ```
 
 ## Usage
 
-### REPL Commands
-
-| Command | Description |
-|---------|-------------|
-| `/exit` | Exit the application |
-| `/clear` | Clear the chat history |
-| `/cwd` | Show current working directory |
-| `/new` | Start a new session |
-| `/model` | Switch the AI model |
-| `/help` | Show available commands |
-
-### Debug Mode
-
 ```bash
-mythcode --debug
+mythcode [OPTIONS] [PROMPT]...
 ```
 
-Enable verbose logging for troubleshooting.
+Options:
+
+- `-p, --project <PATH>`: run against a specific working directory
+- `--model <MODEL>`: request a specific model from the ACP server
+- `--provider <PROVIDER>`: choose `opencode`, `codex`, `claude`, or `pi`
+- `--debug`: enable verbose protocol/debug output
+
+Behavior:
+
+- No prompt + interactive terminal: launches the TUI
+- Prompt provided: runs a one-shot prompt and prints the response
+- Piped or non-interactive stdin: runs line-by-line non-interactive prompting
+
+## TUI Controls
+
+Core controls:
+
+- `Enter`: submit the current input
+- `Shift+Enter` or `Alt+Enter`: insert a newline
+- `Ctrl+C`: cancel current turn, press again to exit
+- `Ctrl+D`: exit
+- `Ctrl+W`: delete previous word
+- `Ctrl+U`: clear input
+- `Ctrl+O`: expand the latest tool output preview
+- `Shift+Tab`: cycle agent modes when the provider exposes multiple modes
+
+Autocomplete and mentions:
+
+- `@`: mention files from the indexed project
+- `/`: open slash-command completion
+- `Tab` / `Down`: cycle suggestions
+- `Up`: move backward through suggestions
+- `Enter`: accept the selected suggestion without sending
+- `Esc`: close suggestions or selection UI
+
+Selection screens:
+
+- `Up` / `Down`: move selection
+- `Enter`: confirm
+- `Esc`: cancel
+
+## Slash Commands
+
+Local commands currently implemented:
+
+- `/help`: show local commands
+- `/model`: change the active model
+- `/new`: start a fresh session
+- `/cwd`: print the current working directory
+- `/clear`: clear terminal history
+- `/resume`: resume a previous session
+- `/exit`: quit Mythcode
 
 ## Architecture
 
-```
+High-level layout:
+
+```text
 src/
-├── main.rs          Entry point
-├── cli.rs           CLI argument parsing
-├── acp_client.rs    ACP protocol client
-├── session.rs       Session management
-├── process.rs       Process handling
-├── input.rs         Input handling
-├── types.rs         Shared types
-└── tui/             Terminal UI components
-    ├── history.rs   Chat history
-    ├── input_box.rs Input field
-    └── markdown.rs  Markdown rendering
+├── main.rs
+├── cli.rs
+├── acp_client.rs
+├── process.rs
+├── session.rs
+├── input.rs
+├── spinner.rs
+├── types.rs
+└── tui/
 ```
 
-## FAQ
+Key pieces:
 
-### Why does it take 6-7 seconds to start?
+- `src/cli.rs`: argument parsing and runtime entry flow
+- `src/acp_client.rs`: ACP client integration
+- `src/process.rs`: provider process spawning and transport wiring
+- `src/session.rs`: session state and lifecycle
+- `src/input.rs`: file indexing and input helpers
+- `src/tui/`: terminal UI, rendering, history, keyboard handling, and highlighting
 
-The startup time comes from launching the ACP server and establishing the connection. This is inherent to how the ACP protocol works, not the mythcode implementation itself.
+## Notes
+
+- Startup latency depends heavily on the ACP provider process booting and connecting
+- `opencode` is launched directly, while the other providers are currently launched through `npx`
+- If a provider fails during startup, Mythcode surfaces stderr context to make debugging less miserable
 
 ## License
 
