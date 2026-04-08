@@ -371,6 +371,36 @@ impl Tui {
                                     self.history.scroll_down(self.term_height as usize / 2);
                                     self.redraw()?;
                                 }
+                                // Allow typing to queue messages during prompt
+                                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                    self.input.insert_char(ch);
+                                    self.redraw()?;
+                                }
+                                KeyCode::Backspace => {
+                                    self.input.delete_char_before();
+                                    self.redraw()?;
+                                }
+                                KeyCode::Left => { self.input.move_left(); self.redraw()?; }
+                                KeyCode::Right => { self.input.move_right(); self.redraw()?; }
+                                KeyCode::Home => { self.input.move_home(); self.redraw()?; }
+                                KeyCode::End => { self.input.move_end(); self.redraw()?; }
+                                KeyCode::Enter if key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => {
+                                    self.input.insert_newline();
+                                    self.redraw()?;
+                                }
+                                KeyCode::Tab => {
+                                    // Queue message while agent is working
+                                    let text = self.input.take_content();
+                                    let trimmed = text.trim().to_string();
+                                    if !trimmed.is_empty() {
+                                        self.message_queue.push(trimmed.clone());
+                                        self.history.push(
+                                            format!("  {C_DIM}queued: {trimmed}{C_RESET}"),
+                                            LineType::Status,
+                                        );
+                                        self.redraw()?;
+                                    }
+                                }
                                 _ => {}
                             },
                             Event::Resize(w, h) => {
