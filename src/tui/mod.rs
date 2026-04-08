@@ -344,6 +344,39 @@ impl Tui {
                     }
                     Some(term_event) = term_rx.recv() => {
                         match term_event {
+                            Event::Key(key) if self.pending_permission.is_some() => {
+                                // Handle permission dialog during prompt phase
+                                match key.code {
+                                    KeyCode::Up => {
+                                        if let Some(ref mut perm) = self.pending_permission {
+                                            if perm.selected > 0 { perm.selected -= 1; }
+                                        }
+                                        self.redraw()?;
+                                    }
+                                    KeyCode::Down => {
+                                        if let Some(ref mut perm) = self.pending_permission {
+                                            if perm.selected + 1 < perm.options.len() { perm.selected += 1; }
+                                        }
+                                        self.redraw()?;
+                                    }
+                                    KeyCode::Enter => {
+                                        let perm = self.pending_permission.take().unwrap();
+                                        let option = &perm.options[perm.selected];
+                                        let decision = PermissionDecision::Selected(option.option_id.clone());
+                                        let summary = option.name.to_lowercase();
+                                        let _ = perm.responder.send(decision);
+                                        self.history.push(format_status(&summary), LineType::Status);
+                                        self.redraw()?;
+                                    }
+                                    KeyCode::Esc => {
+                                        let perm = self.pending_permission.take().unwrap();
+                                        let _ = perm.responder.send(PermissionDecision::Cancelled);
+                                        self.history.push(format_status("cancelled"), LineType::Status);
+                                        self.redraw()?;
+                                    }
+                                    _ => {}
+                                }
+                            }
                             Event::Key(key) => match key.code {
                                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                     if !cancel_sent {
