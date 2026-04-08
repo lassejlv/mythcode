@@ -21,7 +21,7 @@ use history::{
 use input_box::InputBox;
 use markdown::MarkdownParser;
 
-const INPUT_BOX_HEIGHT: u16 = 3;
+const INPUT_BOX_MIN_HEIGHT: u16 = 3;
 const MARGIN_TOP: u16 = 1;
 
 // Claude Code-inspired palette
@@ -62,6 +62,7 @@ struct SelectItem {
 
 enum SelectKind {
     Model,
+    Resume,
 }
 
 impl SelectMode {
@@ -409,7 +410,11 @@ impl Tui {
         match event {
             AppEvent::AssistantText(text) => {
                 self.stop_spinner();
-                self.flush_thinking();
+                // Add spacing when transitioning from thinking to assistant
+                if self.thinking_open {
+                    self.flush_thinking();
+                    self.history.push(String::new(), LineType::Separator);
+                }
                 self.assistant_open = true;
                 self.assistant_buffer.push_str(&text);
                 self.printed_text = true;
@@ -763,6 +768,9 @@ impl Tui {
                 self.redraw()?;
                 return Ok(KeyAction::Continue);
             }
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.input.insert_newline();
+            }
             KeyCode::Enter => {
                 let content = self.input.take_content();
                 return Ok(KeyAction::Submit(content));
@@ -975,10 +983,17 @@ impl Tui {
 
     // ── Layout & rendering ──────────────────────────────────────────
 
+    fn input_box_height(&self) -> u16 {
+        // Grow with content lines, capped at 8
+        let lines = self.input.line_count();
+        (lines + 2).max(INPUT_BOX_MIN_HEIGHT).min(8) // +2 for borders
+    }
+
     fn redraw(&mut self) -> io::Result<()> {
         let mut stdout = io::stdout();
         let w = self.term_width;
         let h = self.term_height;
+        let input_box_h = self.input_box_height();
 
         execute!(stdout, cursor::Hide)?;
 
@@ -998,7 +1013,7 @@ impl Tui {
         }
 
         // Max space for all content (history + extras)
-        let max_content = h.saturating_sub(MARGIN_TOP + INPUT_BOX_HEIGHT);
+        let max_content = h.saturating_sub(MARGIN_TOP + input_box_h);
 
         // History gets the space minus what partials need
         let max_history = max_content.saturating_sub(extra_lines);
@@ -1007,7 +1022,7 @@ impl Tui {
 
         // Non-sticky: input follows content
         let content_rows = history_rows + extra_lines;
-        let input_row = (MARGIN_TOP + content_rows).min(h.saturating_sub(INPUT_BOX_HEIGHT));
+        let input_row = (MARGIN_TOP + content_rows).min(h.saturating_sub(input_box_h));
         let draw_area = input_row.saturating_sub(MARGIN_TOP);
 
         // Clear margin
@@ -1085,14 +1100,25 @@ impl Tui {
             self.project_name.clone()
         };
         let is_active = self.pending_permission.is_none() && self.select_mode.is_none();
-        self.input.render(input_row, w, INPUT_BOX_HEIGHT, &title, is_active)?;
+        self.input.render(input_row, w, input_box_h, &title, is_active)?;
 
-        // Suggestions BELOW the input box
-        let suggestions_start = input_row + INPUT_BOX_HEIGHT;
+        // Suggestions: render below if room, otherwise above the input box
+        let suggestion_count = self.suggestions.len().min(8) as u16;
+        let below_start = input_row + input_box_h;
+        let room_below = h.saturating_sub(below_start);
+        let render_above = suggestion_count > 0 && room_below < suggestion_count;
+
         if !self.suggestions.is_empty() {
             let mut stdout = io::stdout();
+            let base_row = if render_above {
+                // Render above the input box
+                input_row.saturating_sub(suggestion_count)
+            } else {
+                below_start
+            };
+
             for (i, suggestion) in self.suggestions.iter().enumerate().take(8) {
-                let row = suggestions_start + i as u16;
+                let row = base_row + i as u16;
                 if row >= h {
                     break;
                 }
@@ -1103,27 +1129,37 @@ impl Tui {
                     write!(stdout, "\x1b[2K    {C_DIM}{suggestion}{C_RESET}")?;
                 }
             }
-            // Clear remaining rows below suggestions
-            let clear_from = suggestions_start + self.suggestions.len().min(8) as u16;
-            for row in clear_from..h {
-                execute!(stdout, cursor::MoveTo(0, row))?;
-                write!(stdout, "\x1b[2K")?;
+            // Clear remaining rows below input if rendering below
+            if !render_above {
+                let clear_from = base_row + suggestion_count;
+                for row in clear_from..h {
+                    execute!(stdout, cursor::MoveTo(0, row))?;
+                    write!(stdout, "\x1b[2K")?;
+                }
             }
             stdout.flush()?;
         } else if self.select_mode.is_none() {
             // Clear area below input
             let mut stdout = io::stdout();
-            for row in suggestions_start..h {
+            for row in below_start..h {
                 execute!(stdout, cursor::MoveTo(0, row))?;
                 write!(stdout, "\x1b[2K")?;
             }
             stdout.flush()?;
         }
 
-        // Select mode overlay (below input box)
+        // Select mode overlay — above or below input box
         if let Some(ref sel) = self.select_mode {
             let mut stdout = io::stdout();
-            let sel_start = input_row + INPUT_BOX_HEIGHT;
+            let items_shown = sel.filtered.len().min(10) as u16;
+            let sel_total = items_shown + 1; // items + title row
+            let sel_below_start = input_row + input_box_h;
+            let room_below = h.saturating_sub(sel_below_start);
+            let sel_start = if room_below >= sel_total {
+                sel_below_start
+            } else {
+                input_row.saturating_sub(sel_total)
+            };
 
             // Title + filter
             if sel_start < h {
@@ -1131,7 +1167,7 @@ impl Tui {
                 let filter_display = if sel.filter.is_empty() {
                     format!("{C_DIM}type to filter…{C_RESET}")
                 } else {
-                    format!("{C_TEXT}{}{C_RESET}", sel.filter)
+                    format!("\x1b[1m{}\x1b[0m", sel.filter)
                 };
                 write!(
                     stdout,
@@ -1164,7 +1200,7 @@ impl Tui {
             }
 
             // Clear below
-            let clear_from = sel_start + 1 + sel.filtered.len().min(10) as u16;
+            let clear_from = sel_start + 1 + items_shown;
             for row in clear_from..h {
                 execute!(stdout, cursor::MoveTo(0, row))?;
                 write!(stdout, "\x1b[2K")?;
@@ -1173,7 +1209,7 @@ impl Tui {
         }
 
         // Reposition cursor inside the input box (rendering below may have moved it)
-        self.input.reposition_cursor(input_row, w, INPUT_BOX_HEIGHT)?;
+        self.input.reposition_cursor(input_row, w, input_box_h)?;
 
         Ok(())
     }

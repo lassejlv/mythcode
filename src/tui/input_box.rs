@@ -60,6 +60,18 @@ impl InputBox {
         self.cursor_col += 1;
     }
 
+    pub fn insert_newline(&mut self) {
+        self.content.insert(self.cursor_byte, '\n');
+        self.cursor_byte += 1;
+        self.cursor_col = 0;
+    }
+
+    /// Number of lines in the content (1 for empty or single-line).
+    pub fn line_count(&self) -> u16 {
+        (self.content.matches('\n').count() + 1).min(6) as u16
+    }
+
+
     pub fn delete_char_before(&mut self) {
         if self.cursor_byte == 0 {
             return;
@@ -183,34 +195,62 @@ impl InputBox {
         let inner = block.inner(area);
         block.render(area, &mut buf);
 
-        // Render the ">" prompt indicator
+        // Render "> " prompt on first line
         let prompt_col = inner.x;
         if inner.width > 2 {
             let cell = &mut buf[(prompt_col, inner.y)];
             cell.set_char('>');
-            cell.set_fg(Color::Indexed(73));
+            cell.set_fg(Color::Indexed(75));
         }
 
-        // Render input text after the prompt
-        let text_start = prompt_col + 2; // "> " takes 2 cols
+        // Render content lines
+        let text_start = prompt_col + 2; // "> " on first line
         let text_width = inner.width.saturating_sub(2) as usize;
+        let lines: Vec<&str> = self.content.split('\n').collect();
 
-        if !self.content.is_empty() && text_width > 0 {
-            let text_chars: Vec<char> = self.content.chars().collect();
-            let start = if self.cursor_col > text_width.saturating_sub(4) {
-                self.cursor_col.saturating_sub(text_width.saturating_sub(4))
+        // Find which line the cursor is on
+        let before_cursor = &self.content[..self.cursor_byte];
+        let cursor_line_idx = before_cursor.matches('\n').count();
+        let cursor_line_start = before_cursor.rfind('\n').map(|p| p + 1).unwrap_or(0);
+        let cursor_col_in_line = self.content[cursor_line_start..self.cursor_byte].chars().count();
+
+        for (line_idx, line) in lines.iter().enumerate() {
+            let row_in_box = line_idx as u16;
+            if row_in_box >= inner.height {
+                break;
+            }
+            let y = inner.y + row_in_box;
+            // Continuation lines get "  " indent (same as "> ")
+            let x_start = if line_idx == 0 { text_start } else { prompt_col + 2 };
+            let w = if line_idx == 0 { text_width } else { inner.width.saturating_sub(2) as usize };
+
+            if w == 0 {
+                continue;
+            }
+
+            let chars: Vec<char> = line.chars().collect();
+            // Scroll horizontally on the cursor line
+            let scroll = if line_idx == cursor_line_idx && cursor_col_in_line > w.saturating_sub(4) {
+                cursor_col_in_line.saturating_sub(w.saturating_sub(4))
             } else {
                 0
             };
-            let end = (start + text_width).min(text_chars.len());
+            let end = (scroll + w).min(chars.len());
 
-            for (col_offset, idx) in (start..end).enumerate() {
-                let x = text_start + col_offset as u16;
-                if x < area.right() {
-                    let cell = &mut buf[(x, inner.y)];
-                    cell.set_char(text_chars[idx]);
-                    cell.set_fg(Color::Indexed(250));
+            for (col_off, ci) in (scroll..end).enumerate() {
+                let x = x_start + col_off as u16;
+                if x < area.right() && y < area.bottom() {
+                    let cell = &mut buf[(x, y)];
+                    cell.set_char(chars[ci]);
+                    cell.set_fg(Color::Reset);
                 }
+            }
+
+            // Show continuation marker on non-first lines
+            if line_idx > 0 && inner.width > 2 {
+                let cell = &mut buf[(prompt_col, y)];
+                cell.set_char('·');
+                cell.set_fg(Color::Indexed(240));
             }
         }
 
@@ -238,21 +278,11 @@ impl InputBox {
             write!(stdout, "\x1b[38;5;242mType a message...\x1b[0m")?;
         }
 
-        // Position cursor after "> "
-        let cursor_display_col = if self.content.is_empty() {
-            0
-        } else {
-            let start = if self.cursor_col > text_width.saturating_sub(4) {
-                self.cursor_col.saturating_sub(text_width.saturating_sub(4))
-            } else {
-                0
-            };
-            self.cursor_col - start
-        };
-
+        // Position cursor
+        let (cursor_x, cursor_y) = self.cursor_screen_pos(inner, text_start);
         execute!(
             stdout,
-            cursor::MoveTo(text_start + cursor_display_col as u16, inner.y),
+            cursor::MoveTo(cursor_x, cursor_y),
             cursor::Show,
             cursor::SetCursorStyle::SteadyBlock,
         )?;
@@ -261,7 +291,6 @@ impl InputBox {
     }
 
     /// Reposition the cursor into the input box without re-rendering.
-    /// Call after any drawing below the input box that moves the cursor.
     pub fn reposition_cursor(&self, row: u16, width: u16, height: u16) -> io::Result<()> {
         let area = Rect::new(1, row, width.saturating_sub(2), height);
         let block = Block::default()
@@ -269,28 +298,36 @@ impl InputBox {
             .border_set(border::ROUNDED)
             .padding(Padding::horizontal(1));
         let inner = block.inner(area);
-        let text_start = inner.x + 2; // "> " takes 2 cols
-        let text_width = inner.width.saturating_sub(2) as usize;
+        let text_start = inner.x + 2;
 
-        let cursor_display_col = if self.content.is_empty() {
-            0
-        } else {
-            let start = if self.cursor_col > text_width.saturating_sub(4) {
-                self.cursor_col.saturating_sub(text_width.saturating_sub(4))
-            } else {
-                0
-            };
-            self.cursor_col - start
-        };
-
+        let (cursor_x, cursor_y) = self.cursor_screen_pos(inner, text_start);
         let mut stdout = io::stdout();
         execute!(
             stdout,
-            cursor::MoveTo(text_start + cursor_display_col as u16, inner.y),
+            cursor::MoveTo(cursor_x, cursor_y),
             cursor::Show,
             cursor::SetCursorStyle::SteadyBlock,
         )?;
         stdout.flush()
+    }
+
+    fn cursor_screen_pos(&self, inner: Rect, text_start: u16) -> (u16, u16) {
+        if self.content.is_empty() {
+            return (text_start, inner.y);
+        }
+        let before = &self.content[..self.cursor_byte];
+        let line_idx = before.matches('\n').count() as u16;
+        let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
+        let col = self.content[line_start..self.cursor_byte].chars().count();
+        let w = inner.width.saturating_sub(2) as usize;
+        let scroll = if col > w.saturating_sub(4) {
+            col.saturating_sub(w.saturating_sub(4))
+        } else {
+            0
+        };
+        let x = text_start + (col - scroll) as u16;
+        let y = inner.y + line_idx.min(inner.height.saturating_sub(1));
+        (x, y)
     }
 }
 

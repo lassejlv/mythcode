@@ -191,6 +191,71 @@ impl AcpClient {
         Ok(())
     }
 
+    pub async fn list_sessions(&self) -> Result<Vec<SessionListItem>> {
+        let cwd = self.state.borrow().cwd().to_path_buf();
+        let response = self
+            .conn
+            .list_sessions(acp::ListSessionsRequest::new().cwd(cwd))
+            .await
+            .context("failed to list sessions")?;
+        Ok(response
+            .sessions
+            .into_iter()
+            .map(|s| SessionListItem {
+                id: s.session_id.to_string(),
+                title: s.title.unwrap_or_else(|| "(untitled)".to_string()),
+                updated_at: s.updated_at,
+            })
+            .collect())
+    }
+
+    pub async fn resume_session(&mut self, session_id: &str) -> Result<()> {
+        let cwd = self.state.borrow().cwd().to_path_buf();
+        let response = self
+            .conn
+            .resume_session(acp::ResumeSessionRequest::new(
+                session_id.to_string(),
+                cwd.clone(),
+            ))
+            .await
+            .context("failed to resume session")?;
+
+        let mut session = SessionState::new(session_id.to_string(), cwd);
+
+        #[cfg(feature = "unstable_session_model")]
+        if let Some(models) = &response.models {
+            session.set_models(SessionModels {
+                current_model_id: Some(models.current_model_id.to_string()),
+                available: models
+                    .available_models
+                    .iter()
+                    .map(|m| crate::types::ModelOption {
+                        id: m.model_id.to_string(),
+                        name: m.name.clone(),
+                        description: m.description.clone(),
+                    })
+                    .collect(),
+            });
+        }
+
+        if let Some(modes) = &response.modes {
+            session.set_current_mode(Some(modes.current_mode_id.to_string()));
+            session.set_available_modes(
+                modes
+                    .available_modes
+                    .iter()
+                    .map(|m| crate::session::ModeOption {
+                        id: m.id.to_string(),
+                        name: m.name.clone(),
+                    })
+                    .collect(),
+            );
+        }
+
+        *self.state.borrow_mut() = session;
+        Ok(())
+    }
+
     pub fn session_snapshot(&self) -> SessionState {
         self.state.borrow().clone()
     }
@@ -198,6 +263,13 @@ impl AcpClient {
     pub async fn shutdown(&self) {
         self.process.shutdown().await;
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionListItem {
+    pub id: String,
+    pub title: String,
+    pub updated_at: Option<String>,
 }
 
 async fn new_session_inner(

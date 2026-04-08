@@ -14,7 +14,6 @@ const C_HEADER2: &str = "\x1b[1m";
 const C_HEADER3: &str = "\x1b[1;38;5;249m";
 const C_BULLET: &str = "\x1b[38;5;245m";
 const C_THINKING: &str = "\x1b[3;38;5;239m"; // dark italic — clearly subordinate to body text
-const C_TEXT: &str = "\x1b[0m";              // default terminal foreground
 
 pub struct MarkdownParser {
     in_code_block: bool,
