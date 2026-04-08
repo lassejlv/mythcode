@@ -101,7 +101,7 @@ pub fn format_user_message(message: &str) -> Vec<String> {
 
 /// Activity line: tool calls, mode changes, etc.
 pub fn format_activity(activity: &str) -> String {
-    format!("    {C_DARK}▸ {activity}{C_RESET}")
+    format!("    {C_ACCENT}▸{C_RESET} {C_DARK}{activity}{C_RESET}")
 }
 
 /// Warning line
@@ -118,20 +118,30 @@ pub fn format_status(message: &str) -> String {
 const TOOL_OUTPUT_MAX_LINES: usize = 4;
 
 /// Format tool output with truncation
-pub fn format_tool_output(_title: &str, content: &str, total_lines: usize) -> Vec<String> {
+pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec<String> {
     let mut lines = Vec::new();
+
+    // Title header
+    if !title.is_empty() {
+        lines.push(format!("    {C_ACCENT}▸{C_RESET} {C_GRAY}{title}{C_RESET}"));
+    }
+
     let preview_lines: Vec<&str> = content.lines().take(TOOL_OUTPUT_MAX_LINES).collect();
     let shown = preview_lines.len();
 
-    for line in &preview_lines {
-        lines.push(format!("    {C_DARK}│{C_RESET} {C_DARK}{line}{C_RESET}"));
-    }
-
-    if total_lines > shown {
-        let remaining = total_lines - shown;
-        lines.push(format!(
-            "    {C_DARK}│ … {remaining} more lines (ctrl+o to expand){C_RESET}"
-        ));
+    if shown > 0 {
+        lines.push(format!("    {C_DARK}╭─{C_RESET}"));
+        for line in &preview_lines {
+            lines.push(format!("    {C_DARK}│{C_RESET} {C_DARK}{line}{C_RESET}"));
+        }
+        if total_lines > shown {
+            let remaining = total_lines - shown;
+            lines.push(format!(
+                "    {C_DARK}╰─ … {remaining} more lines (ctrl+o to expand){C_RESET}"
+            ));
+        } else {
+            lines.push(format!("    {C_DARK}╰─{C_RESET}"));
+        }
     }
 
     lines

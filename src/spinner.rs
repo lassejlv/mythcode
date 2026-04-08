@@ -58,15 +58,49 @@ const TOOL_MESSAGES: &[&str] = &[
     "Wiring…",
 ];
 
-/// Pick a status message based on elapsed seconds — changes every ~4s.
+/// How often status messages rotate (in seconds).
+const MESSAGE_ROTATE_SECS: u64 = 10;
+
+/// Pick a status message based on elapsed seconds.
 pub fn thinking_message(elapsed_secs: u64) -> &'static str {
-    let idx = (elapsed_secs / 4) as usize % THINKING_MESSAGES.len();
+    let idx = (elapsed_secs / MESSAGE_ROTATE_SECS) as usize % THINKING_MESSAGES.len();
     THINKING_MESSAGES[idx]
 }
 
 pub fn tool_message(elapsed_secs: u64) -> &'static str {
-    let idx = (elapsed_secs / 4) as usize % TOOL_MESSAGES.len();
+    let idx = (elapsed_secs / MESSAGE_ROTATE_SECS) as usize % TOOL_MESSAGES.len();
     TOOL_MESSAGES[idx]
+}
+
+/// Pick a message based on the active tool name. Falls back to generic pool.
+pub fn tool_message_for(tool_hint: &str, elapsed_secs: u64) -> &'static str {
+    let lower = tool_hint.to_lowercase();
+    // Match on common tool name prefixes/keywords
+    if lower.contains("read") || lower.contains("cat") {
+        "Reading…"
+    } else if lower.contains("edit") || lower.contains("write") || lower.contains("patch") {
+        "Editing…"
+    } else if lower.contains("bash") || lower.contains("shell") || lower.contains("exec") {
+        "Running…"
+    } else if lower.contains("grep") || lower.contains("search") || lower.contains("glob") || lower.contains("find") {
+        "Searching…"
+    } else if lower.contains("list") || lower.contains("ls") {
+        "Listing…"
+    } else if lower.contains("test") {
+        "Testing…"
+    } else if lower.contains("build") || lower.contains("compile") {
+        "Building…"
+    } else if lower.contains("install") {
+        "Installing…"
+    } else if lower.contains("fetch") || lower.contains("download") || lower.contains("curl") {
+        "Fetching…"
+    } else if lower.contains("git") {
+        "Committing…"
+    } else if lower.contains("lint") || lower.contains("format") || lower.contains("fmt") {
+        "Formatting…"
+    } else {
+        tool_message(elapsed_secs)
+    }
 }
 
 /// Format elapsed time as "Xs" or "Xm Ys"
