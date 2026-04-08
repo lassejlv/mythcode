@@ -1,19 +1,28 @@
 # Mythcode
 
-A Rust CLI that talks to AI-agents over ACP.
+A lightweight Rust CLI for interacting with AI coding agents via the ACP (Agent Client Protocol). Currently supports [opencode](https://github.com/anomalyco/opencode).
 
-Currently only supports opencode. More to come.
+## Features
+
+- **Interactive REPL** — Chat with AI agents in real-time
+- **One-shot mode** — Run single prompts from the command line
+- **Project context** — Automatically include project files in context
+- **Rich TUI** — Terminal UI with markdown rendering, syntax highlighting, and history
+- **Tab completion** — Insert suggestions with Tab
+- **Keyboard shortcuts** — Cancel with `Ctrl+C`, use `/` for commands, `@` for file mentions
 
 ## Requirements
 
 - Rust stable
-- `opencode` in `PATH`
+- `opencode` installed and in `PATH`
 
-## Install
+## Installation
 
 ```bash
 cargo build --release
 ```
+
+The binary will be at `target/release/mythcode`. Add it to your PATH for convenience.
 
 ## Usage
 
@@ -22,21 +31,49 @@ cargo build --release
 mythcode
 
 # One-shot prompt
-mythcode "explain this repo"
+mythcode "explain this code"
 
-# Run against a project
-mythcode -p ./project "fix the tests"
+# Run against a specific project
+mythcode -p ./my-project "fix the tests"
 
-# Debug mode
+# Debug mode (verbose logging)
 mythcode --debug
 ```
 
-## REPL commands
+## REPL Commands
 
-`/exit` `/clear` `/cwd` `/new` `/model` `/help`
+| Command | Description |
+|---------|-------------|
+| `/exit` | Exit the application |
+| `/clear` | Clear the chat history |
+| `/cwd` | Show current working directory |
+| `/new` | Start a new session |
+| `/model` | Switch the AI model |
+| `/help` | Show available commands |
 
-## Tips
+## Architecture
 
-- `/` for commands, `@` for file mentions
-- `Tab` to insert suggestions
-- `Ctrl+C` once to cancel, twice to exit
+```
+src/
+├── main.rs          # Entry point
+├── cli.rs           # CLI argument parsing
+├── acp_client.rs    # ACP protocol client
+├── session.rs       # Session management
+├── process.rs       # Process handling
+├── input.rs         # Input handling
+├── types.rs         # Shared types
+└── tui/             # Terminal UI components
+    ├── history.rs   # Chat history
+    ├── input_box.rs # Input field
+    └── markdown.rs  # Markdown rendering
+```
+
+## FAQ
+
+**Why does it take 6-7 seconds to start?**
+
+The startup time comes from launching the ACP server and establishing the connection. This is inherent to how the ACP protocol works, not the mythcode implementation itself.
+
+## License
+
+MIT

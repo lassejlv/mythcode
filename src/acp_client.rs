@@ -12,7 +12,7 @@ use crate::session::SessionState;
 use crate::types::{
     AppConfig, AppEvent, DiffPreview, PermissionDecision, PermissionOptionKindView,
     PermissionOptionView, PermissionRequestView, PromptResult, SessionModels, SlashCommand,
-    SlashCommandSource,
+    SlashCommandSource, ToolOutputView,
 };
 
 pub struct AcpClient {
@@ -176,6 +176,21 @@ impl AcpClient {
         Ok(())
     }
 
+    pub async fn set_mode(&self, mode_id: &str) -> Result<()> {
+        let session_id = self.state.borrow().id().clone();
+        self.conn
+            .set_session_mode(acp::SetSessionModeRequest::new(
+                session_id,
+                mode_id.to_string(),
+            ))
+            .await
+            .context("failed to set mode")?;
+        self.state
+            .borrow_mut()
+            .set_current_mode(Some(mode_id.to_string()));
+        Ok(())
+    }
+
     pub fn session_snapshot(&self) -> SessionState {
         self.state.borrow().clone()
     }
@@ -202,6 +217,21 @@ async fn new_session_inner(
 
     let mut session = SessionState::new(response.session_id.clone(), cwd.to_path_buf());
     session.set_models(session_models_from_response(&response));
+
+    // Extract modes if available
+    if let Some(modes) = &response.modes {
+        session.set_current_mode(Some(modes.current_mode_id.to_string()));
+        session.set_available_modes(
+            modes
+                .available_modes
+                .iter()
+                .map(|m| crate::session::ModeOption {
+                    id: m.id.to_string(),
+                    name: m.name.clone(),
+                })
+                .collect(),
+        );
+    }
 
     if let Some(model) = model {
         if let Err(error) = set_model_inner(conn, &session, event_tx, model).await {
@@ -379,10 +409,10 @@ impl acp::Client for ClientHandler {
                 self.tool_calls
                     .borrow_mut()
                     .insert(tool_call.tool_call_id.to_string(), tool_call.clone());
-                let _ = self
-                    .event_tx
-                    .send(AppEvent::Activity(tool_call_title(&tool_call)));
+                let title = tool_call_title(&tool_call);
+                let _ = self.event_tx.send(AppEvent::Activity(title.clone()));
                 emit_diffs(&self.event_tx, extract_diff_previews(&tool_call.content));
+                emit_tool_output(&self.event_tx, &title, &tool_call.content);
             }
             acp::SessionUpdate::ToolCallUpdate(update) => {
                 let mut tool_calls = self.tool_calls.borrow_mut();
@@ -429,6 +459,11 @@ impl acp::Client for ClientHandler {
                 self.state.borrow_mut().set_title(title.clone());
                 if let Some(title) = title {
                     let _ = self.event_tx.send(AppEvent::SessionTitle(title));
+                }
+            }
+            acp::SessionUpdate::AgentThoughtChunk(chunk) => {
+                if let Some(text) = content_text(&chunk.content) {
+                    let _ = self.event_tx.send(AppEvent::ThinkingText(text));
                 }
             }
             _ => {}
@@ -492,6 +527,55 @@ fn permission_kind(kind: &acp::PermissionOptionKind) -> PermissionOptionKindView
         acp::PermissionOptionKind::RejectAlways => PermissionOptionKindView::RejectAlways,
         _ => PermissionOptionKindView::Other,
     }
+}
+
+fn emit_tool_output(
+    event_tx: &mpsc::UnboundedSender<AppEvent>,
+    title: &str,
+    content: &[acp::ToolCallContent],
+) {
+    let mut text = String::new();
+    for item in content {
+        if let acp::ToolCallContent::Content(c) = item {
+            if let acp::ContentBlock::Text(t) = &c.content {
+                text.push_str(&t.text);
+            }
+        }
+    }
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    // Filter out lines that are just XML-like tags or structured metadata
+    let clean_lines: Vec<&str> = trimmed
+        .lines()
+        .filter(|line| {
+            let t = line.trim();
+            // Skip XML-like tags
+            if t.starts_with('<') && t.ends_with('>') {
+                return false;
+            }
+            // Skip empty lines at this stage
+            if t.is_empty() {
+                return false;
+            }
+            true
+        })
+        .collect();
+
+    if clean_lines.is_empty() {
+        return;
+    }
+
+    let clean_text = clean_lines.join("\n");
+    let total_lines = clean_lines.len();
+
+    let _ = event_tx.send(AppEvent::ToolOutput(ToolOutputView {
+        title: title.to_string(),
+        content: clean_text,
+        total_lines,
+    }));
 }
 
 fn emit_diffs(event_tx: &mpsc::UnboundedSender<AppEvent>, diffs: Vec<DiffPreview>) {

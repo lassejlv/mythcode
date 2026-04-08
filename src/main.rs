@@ -2,8 +2,9 @@ mod acp_client;
 mod cli;
 mod input;
 mod process;
-mod render;
 mod session;
+mod spinner;
+mod tui;
 mod types;
 
 #[tokio::main(flavor = "current_thread")]

@@ -15,10 +15,12 @@ pub struct AppConfig {
 #[derive(Debug)]
 pub enum AppEvent {
     AssistantText(String),
+    ThinkingText(String),
     Activity(String),
     ModeChanged(String),
     SessionTitle(String),
     ToolDiff(DiffPreview),
+    ToolOutput(ToolOutputView),
     PermissionRequest(PermissionRequestView),
     Warning(String),
     DebugProtocol(String),
@@ -69,6 +71,13 @@ pub struct DiffPreview {
     pub path: PathBuf,
     pub old_text: Option<String>,
     pub new_text: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolOutputView {
+    pub title: String,
+    pub content: String,
+    pub total_lines: usize,
 }
 
 #[derive(Debug)]
@@ -134,6 +143,7 @@ pub enum CommandAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum PromptOutcome {
     Completed,
     ExitRequested,

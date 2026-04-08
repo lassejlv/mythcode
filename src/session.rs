@@ -10,8 +10,15 @@ pub struct SessionState {
     cwd: PathBuf,
     title: Option<String>,
     current_mode: Option<String>,
+    available_modes: Vec<ModeOption>,
     commands: Vec<SlashCommand>,
     models: SessionModels,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModeOption {
+    pub id: String,
+    pub name: String,
 }
 
 impl SessionState {
@@ -21,6 +28,7 @@ impl SessionState {
             cwd,
             title: None,
             current_mode: None,
+            available_modes: Vec::new(),
             commands: Vec::new(),
             models: SessionModels::default(),
         }
@@ -56,6 +64,18 @@ impl SessionState {
 
     pub fn set_title(&mut self, title: Option<String>) {
         self.title = title;
+    }
+
+    pub fn current_mode(&self) -> Option<&str> {
+        self.current_mode.as_deref()
+    }
+
+    pub fn available_modes(&self) -> &[ModeOption] {
+        &self.available_modes
+    }
+
+    pub fn set_available_modes(&mut self, modes: Vec<ModeOption>) {
+        self.available_modes = modes;
     }
 
     pub fn set_current_mode(&mut self, mode: Option<String>) {
