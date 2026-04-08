@@ -3,10 +3,10 @@ mod input_box;
 mod markdown;
 
 use std::io::{self, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::{cursor, execute, terminal};
 use tokio::sync::mpsc;
 
@@ -15,8 +15,8 @@ use crate::input::FileIndex;
 use crate::types::{AppEvent, CommandAction, PermissionDecision, PermissionOptionView, ShutdownSignal, ToolOutputView};
 
 use history::{
-    format_activity, format_diff, format_status, format_tool_output, format_user_message,
-    format_warning, History, LineType,
+    format_activity, format_diff, format_plan, format_status, format_tool_output,
+    format_user_message, format_warning, History, LineType,
 };
 use input_box::InputBox;
 use markdown::MarkdownParser;
@@ -117,6 +117,8 @@ pub struct Tui {
     turn_count: u32,
     spinner_frame: usize,
     spinner_active: bool,
+    turn_start: Option<Instant>,
+    tool_active: bool,
     partial_line: Option<String>,
     thinking_partial: Option<String>,
     suggestions: Vec<String>,
@@ -125,6 +127,8 @@ pub struct Tui {
     project_name: String,
     current_mode: Option<String>,
     last_tool_outputs: Vec<ToolOutputView>,
+    live_output_lines: usize,
+    message_queue: Vec<String>,
 }
 
 impl Tui {
@@ -146,6 +150,8 @@ impl Tui {
             turn_count: 0,
             spinner_frame: 0,
             spinner_active: false,
+            turn_start: None,
+            tool_active: false,
             partial_line: None,
             thinking_partial: None,
             suggestions: Vec::new(),
@@ -154,6 +160,8 @@ impl Tui {
             project_name: String::new(),
             current_mode: None,
             last_tool_outputs: Vec::new(),
+            live_output_lines: 0,
+            message_queue: Vec::new(),
         }
     }
 
@@ -201,7 +209,6 @@ impl Tui {
         execute!(
             io::stdout(),
             terminal::EnterAlternateScreen,
-            crossterm::event::EnableMouseCapture,
             cursor::Show,
         )?;
 
@@ -256,10 +263,6 @@ impl Tui {
                             Event::Resize(w, h) => {
                                 self.term_width = w;
                                 self.term_height = h;
-                                self.redraw()?;
-                            }
-                            Event::Mouse(mouse) => {
-                                self.handle_mouse(mouse);
                                 self.redraw()?;
                             }
                             _ => {}
@@ -349,6 +352,14 @@ impl Tui {
                                         break 'outer;
                                     }
                                 }
+                                KeyCode::Esc => {
+                                    if !cancel_sent {
+                                        client.cancel_current_turn().await?;
+                                        self.history.push(format_activity("cancelling"), LineType::Activity);
+                                        cancel_sent = true;
+                                        self.redraw()?;
+                                    }
+                                }
                                 KeyCode::PageUp => {
                                     self.history.scroll_up(self.term_height as usize / 2);
                                     self.redraw()?;
@@ -362,10 +373,6 @@ impl Tui {
                             Event::Resize(w, h) => {
                                 self.term_width = w;
                                 self.term_height = h;
-                                self.redraw()?;
-                            }
-                            Event::Mouse(mouse) => {
-                                self.handle_mouse(mouse);
                                 self.redraw()?;
                             }
                             _ => {}
@@ -396,7 +403,6 @@ impl Tui {
         let _ = terminal::disable_raw_mode();
         let _ = execute!(
             io::stdout(),
-            crossterm::event::DisableMouseCapture,
             terminal::LeaveAlternateScreen,
             cursor::SetCursorStyle::DefaultUserShape,
         );
@@ -410,6 +416,8 @@ impl Tui {
         match event {
             AppEvent::AssistantText(text) => {
                 self.stop_spinner();
+                self.tool_active = false;
+                self.live_output_lines = 0;
                 // Add spacing when transitioning from thinking to assistant
                 if self.thinking_open {
                     self.flush_thinking();
@@ -422,6 +430,7 @@ impl Tui {
             }
             AppEvent::ThinkingText(text) => {
                 self.stop_spinner();
+                self.tool_active = false;
                 self.flush_assistant();
                 self.thinking_open = true;
                 self.thinking_buffer.push_str(&text);
@@ -431,11 +440,13 @@ impl Tui {
                 if self.last_activity.as_deref() == Some(&activity) {
                     return;
                 }
-                self.stop_spinner();
                 self.flush_assistant();
                 self.flush_thinking();
+                self.live_output_lines = 0; // new tool, reset live output
                 self.history.push(format_activity(&activity), LineType::Activity);
                 self.last_activity = Some(activity);
+                self.tool_active = true;
+                self.spinner_active = true;
             }
             AppEvent::ModeChanged(mode) => {
                 self.stop_spinner();
@@ -462,10 +473,21 @@ impl Tui {
                 self.history.push(String::new(), LineType::Diff);
             }
             AppEvent::ToolOutput(output) => {
-                self.stop_spinner();
+                // Replace previous live output lines
+                if self.live_output_lines > 0 {
+                    self.history.pop_n(self.live_output_lines);
+                }
                 let lines = format_tool_output(&output.title, &output.content, output.total_lines);
+                self.live_output_lines = lines.len();
                 self.history.push_lines(lines, LineType::Activity);
                 self.last_tool_outputs.push(output);
+            }
+            AppEvent::PlanUpdate(plan) => {
+                self.stop_spinner();
+                self.flush_assistant();
+                self.flush_thinking();
+                let lines = format_plan(&plan);
+                self.history.push_lines(lines, LineType::Activity);
             }
             AppEvent::Warning(msg) => {
                 self.stop_spinner();
@@ -573,8 +595,11 @@ impl Tui {
         self.printed_text = false;
         self.last_activity = None;
         self.last_tool_outputs.clear();
+        self.live_output_lines = 0;
         self.spinner_active = true;
         self.spinner_frame = 0;
+        self.turn_start = Some(Instant::now());
+        self.tool_active = false;
     }
 
     fn finish_turn(&mut self, result: &crate::types::PromptResult) {
@@ -582,13 +607,27 @@ impl Tui {
         self.flush_assistant();
         self.flush_thinking();
 
+        let elapsed = self.turn_start
+            .map(|t| crate::spinner::format_elapsed(t.elapsed().as_secs()))
+            .unwrap_or_default();
+
         if matches!(
             result.stop_reason,
             agent_client_protocol::StopReason::Cancelled
         ) {
-            self.history.push(format_status("cancelled"), LineType::Status);
+            self.history.push(
+                format_status(&format!("cancelled · {elapsed}")),
+                LineType::Status,
+            );
+        } else if !elapsed.is_empty() {
+            self.history.push(
+                format!("  {C_DARK}· {elapsed}{C_RESET}"),
+                LineType::Status,
+            );
         }
         self.history.push(String::new(), LineType::Separator);
+        self.turn_start = None;
+        self.tool_active = false;
     }
 
     fn stop_spinner(&mut self) {
@@ -602,7 +641,7 @@ impl Tui {
         key: KeyEvent,
         client: &mut AcpClient,
         pending_exit: &mut bool,
-        file_index: &FileIndex,
+        file_index: &mut FileIndex,
     ) -> Result<KeyAction> {
         // Select mode (model picker, etc.)
         if let Some(ref mut sel) = self.select_mode {
@@ -631,6 +670,20 @@ impl Tui {
                                     format_status(&format!("model → {name}")),
                                     LineType::Status,
                                 );
+                            }
+                            SelectKind::Resume => {
+                                let id = item.id.clone();
+                                let name = item.display.clone();
+                                client.resume_session(&id).await?;
+                                self.current_mode = client.session_snapshot().current_mode().map(|s| s.to_string());
+                                *file_index = crate::cli::build_file_index(client.session_snapshot().cwd());
+                                self.history.clear();
+                                self.history.push(String::new(), LineType::Status);
+                                self.history.push(
+                                    format_status(&format!("resumed: {name}")),
+                                    LineType::Status,
+                                );
+                                self.history.push(String::new(), LineType::Status);
                             }
                         }
                     }
@@ -772,8 +825,15 @@ impl Tui {
                 self.input.insert_newline();
             }
             KeyCode::Enter => {
-                let content = self.input.take_content();
-                return Ok(KeyAction::Submit(content));
+                let current = self.input.take_content();
+                // Combine queued messages with current
+                let mut parts = std::mem::take(&mut self.message_queue);
+                let trimmed = current.trim().to_string();
+                if !trimmed.is_empty() {
+                    parts.push(trimmed);
+                }
+                let combined = parts.join("\n");
+                return Ok(KeyAction::Submit(combined));
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if *pending_exit {
@@ -842,10 +902,22 @@ impl Tui {
                 self.history.scroll_down(self.term_height as usize / 2);
             }
             KeyCode::Tab => {
+                // If suggestions are available, cycle them
                 self.update_suggestions_with_client(file_index, client);
                 if !self.suggestions.is_empty() {
                     self.selected_suggestion = Some(0);
                     self.input.set_content(&self.suggestions[0].clone());
+                } else {
+                    // Queue the current message and clear input for the next
+                    let text = self.input.take_content();
+                    let trimmed = text.trim().to_string();
+                    if !trimmed.is_empty() {
+                        self.message_queue.push(trimmed.clone());
+                        self.history.push(
+                            format!("  {C_DIM}queued: {trimmed}{C_RESET}"),
+                            LineType::Status,
+                        );
+                    }
                 }
             }
             _ => {}
@@ -853,14 +925,6 @@ impl Tui {
 
         self.redraw()?;
         Ok(KeyAction::Continue)
-    }
-
-    fn handle_mouse(&mut self, mouse: MouseEvent) {
-        match mouse.kind {
-            MouseEventKind::ScrollUp => self.history.scroll_up(3),
-            MouseEventKind::ScrollDown => self.history.scroll_down(3),
-            _ => {}
-        }
     }
 
     fn update_suggestions_with_client(&mut self, file_index: &FileIndex, client: &AcpClient) {
@@ -933,6 +997,30 @@ impl Tui {
                     .push(format_status("new session"), LineType::Status);
                 Ok(Some(CommandAction::Continue))
             }
+            "/resume" => {
+                match client.list_sessions().await {
+                    Ok(sessions) if !sessions.is_empty() => {
+                        let items: Vec<SelectItem> = sessions
+                            .into_iter()
+                            .map(|s| {
+                                let time_hint = s.updated_at.as_deref().unwrap_or("");
+                                SelectItem {
+                                    id: s.id,
+                                    display: format!("{} {}", s.title, C_DIM.to_string() + time_hint + C_RESET),
+                                }
+                            })
+                            .collect();
+                        self.select_mode = Some(SelectMode::new("Resume session", items, SelectKind::Resume));
+                    }
+                    Ok(_) => {
+                        self.history.push(format_status("no sessions found"), LineType::Status);
+                    }
+                    Err(e) => {
+                        self.history.push(format_warning(&format!("failed to list sessions: {e}")), LineType::Warning);
+                    }
+                }
+                Ok(Some(CommandAction::Continue))
+            }
             "/model" => {
                 let session = client.session_snapshot();
                 let models = session.models();
@@ -967,6 +1055,7 @@ impl Tui {
                     ("/clear", "clear the screen"),
                     ("/cwd", "show working directory"),
                     ("/new", "start a new session"),
+                    ("/resume", "resume a previous session"),
                     ("/model", "select a model"),
                 ] {
                     self.history.push(
@@ -1020,9 +1109,10 @@ impl Tui {
         let visible = self.history.visible_lines(max_history as usize);
         let history_rows = visible.len() as u16;
 
-        // Non-sticky: input follows content
+        // Non-sticky: input follows content with a 1-line gap
         let content_rows = history_rows + extra_lines;
-        let input_row = (MARGIN_TOP + content_rows).min(h.saturating_sub(input_box_h));
+        let gap = if content_rows > 0 { 1u16 } else { 0 };
+        let input_row = (MARGIN_TOP + content_rows + gap).min(h.saturating_sub(input_box_h));
         let draw_area = input_row.saturating_sub(MARGIN_TOP);
 
         // Clear margin
@@ -1059,16 +1149,26 @@ impl Tui {
             }
         }
 
-        // Spinner
+        // Spinner with timer and fun messages
         if self.spinner_active
             && self.partial_line.is_none()
             && self.thinking_partial.is_none()
             && extra_row < input_row
         {
+            let elapsed_secs = self.turn_start
+                .map(|t| t.elapsed().as_secs())
+                .unwrap_or(0);
             let frame = crate::spinner::frame(self.spinner_frame);
-            let shimmer = crate::spinner::shimmer_thinking(self.spinner_frame);
+            let timer = crate::spinner::format_elapsed(elapsed_secs);
+
+            let shimmer = if self.tool_active {
+                crate::spinner::shimmer(self.spinner_frame, crate::spinner::tool_message(elapsed_secs))
+            } else {
+                crate::spinner::shimmer(self.spinner_frame, crate::spinner::thinking_message(elapsed_secs))
+            };
+
             execute!(stdout, cursor::MoveTo(0, extra_row))?;
-            write!(stdout, "\x1b[2K  {C_SPINNER}{frame}{C_RESET}  {shimmer}")?;
+            write!(stdout, "\x1b[2K  {C_SPINNER}{frame}{C_RESET}  {shimmer}  {C_DARK}{timer}{C_RESET}")?;
         }
 
         // Permission options (rendered between history and input)
@@ -1094,11 +1194,14 @@ impl Tui {
         stdout.flush()?;
 
         // Input box (non-sticky: positioned after content)
-        let title = if let Some(ref mode) = self.current_mode {
+        let mut title = if let Some(ref mode) = self.current_mode {
             format!("{} · {}", self.project_name, mode)
         } else {
             self.project_name.clone()
         };
+        if !self.message_queue.is_empty() {
+            title.push_str(&format!(" ({} queued)", self.message_queue.len()));
+        }
         let is_active = self.pending_permission.is_none() && self.select_mode.is_none();
         self.input.render(input_row, w, input_box_h, &title, is_active)?;
 

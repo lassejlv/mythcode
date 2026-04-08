@@ -21,6 +21,7 @@ pub enum AppEvent {
     SessionTitle(String),
     ToolDiff(DiffPreview),
     ToolOutput(ToolOutputView),
+    PlanUpdate(PlanView),
     PermissionRequest(PermissionRequestView),
     Warning(String),
     DebugProtocol(String),
@@ -78,6 +79,24 @@ pub struct ToolOutputView {
     pub title: String,
     pub content: String,
     pub total_lines: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlanView {
+    pub entries: Vec<PlanEntryView>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlanEntryView {
+    pub content: String,
+    pub status: PlanEntryStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanEntryStatus {
+    Pending,
+    InProgress,
+    Completed,
 }
 
 #[derive(Debug)]

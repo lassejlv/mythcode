@@ -32,9 +32,58 @@ pub fn frame(tick: usize) -> &'static str {
     FRAMES[(tick / SPINNER_DIVISOR) % FRAMES.len()]
 }
 
-/// Render "Thinking…" with a smooth light wave rolling left to right.
-pub fn shimmer_thinking(tick: usize) -> String {
-    let text = "Thinking…";
+// ── Status messages ─────────────────────────────────────────────
+
+const THINKING_MESSAGES: &[&str] = &[
+    "Thinking…",
+    "Cooking…",
+    "Brewing ideas…",
+    "Pondering…",
+    "Conjuring…",
+    "Dreaming up…",
+    "Crafting…",
+    "Weaving…",
+    "Scheming…",
+    "Imagining…",
+];
+
+const TOOL_MESSAGES: &[&str] = &[
+    "Working…",
+    "Running…",
+    "Processing…",
+    "Executing…",
+    "Crunching…",
+    "Building…",
+    "Hammering…",
+    "Wiring…",
+];
+
+/// Pick a status message based on elapsed seconds — changes every ~4s.
+pub fn thinking_message(elapsed_secs: u64) -> &'static str {
+    let idx = (elapsed_secs / 4) as usize % THINKING_MESSAGES.len();
+    THINKING_MESSAGES[idx]
+}
+
+pub fn tool_message(elapsed_secs: u64) -> &'static str {
+    let idx = (elapsed_secs / 4) as usize % TOOL_MESSAGES.len();
+    TOOL_MESSAGES[idx]
+}
+
+/// Format elapsed time as "Xs" or "Xm Ys"
+pub fn format_elapsed(elapsed_secs: u64) -> String {
+    if elapsed_secs < 60 {
+        format!("{elapsed_secs}s")
+    } else {
+        let m = elapsed_secs / 60;
+        let s = elapsed_secs % 60;
+        format!("{m}m {s}s")
+    }
+}
+
+// ── Shimmer ─────────────────────────────────────────────────────
+
+/// Render text with a smooth light wave rolling left to right.
+pub fn shimmer(tick: usize, text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();
 

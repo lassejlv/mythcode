@@ -11,8 +11,8 @@ use crate::process::OpenCodeProcess;
 use crate::session::SessionState;
 use crate::types::{
     AppConfig, AppEvent, DiffPreview, PermissionDecision, PermissionOptionKindView,
-    PermissionOptionView, PermissionRequestView, PromptResult, SessionModels, SlashCommand,
-    SlashCommandSource, ToolOutputView,
+    PermissionOptionView, PermissionRequestView, PlanEntryStatus, PlanEntryView, PlanView,
+    PromptResult, SessionModels, SlashCommand, SlashCommandSource, ToolOutputView,
 };
 
 pub struct AcpClient {
@@ -222,7 +222,6 @@ impl AcpClient {
 
         let mut session = SessionState::new(session_id.to_string(), cwd);
 
-        #[cfg(feature = "unstable_session_model")]
         if let Some(models) = &response.models {
             session.set_models(SessionModels {
                 current_model_id: Some(models.current_model_id.to_string()),
@@ -250,6 +249,15 @@ impl AcpClient {
                     })
                     .collect(),
             );
+        }
+
+        // Re-apply model override if set
+        if let Some(ref model) = self.model {
+            if let Err(e) = set_model_inner(&self.conn, &session, &self.event_tx, model).await {
+                let _ = self.event_tx.send(AppEvent::Warning(e.to_string()));
+            } else {
+                session.set_current_model_id(Some(model.clone()));
+            }
         }
 
         *self.state.borrow_mut() = session;
@@ -511,6 +519,8 @@ impl acp::Client for ClientHandler {
 
                 if previous.as_ref().map(|tool| &tool.content) != Some(&next.content) {
                     emit_diffs(&self.event_tx, extract_diff_previews(&next.content));
+                    let title = next.title.clone();
+                    emit_tool_output(&self.event_tx, &title, &next.content);
                 }
             }
             acp::SessionUpdate::AvailableCommandsUpdate(update) => {
@@ -537,6 +547,22 @@ impl acp::Client for ClientHandler {
                 if let Some(text) = content_text(&chunk.content) {
                     let _ = self.event_tx.send(AppEvent::ThinkingText(text));
                 }
+            }
+            acp::SessionUpdate::Plan(plan) => {
+                let entries = plan
+                    .entries
+                    .iter()
+                    .map(|e| PlanEntryView {
+                        content: e.content.clone(),
+                        status: match e.status {
+                            acp::PlanEntryStatus::Pending => PlanEntryStatus::Pending,
+                            acp::PlanEntryStatus::InProgress => PlanEntryStatus::InProgress,
+                            acp::PlanEntryStatus::Completed => PlanEntryStatus::Completed,
+                            _ => PlanEntryStatus::Pending,
+                        },
+                    })
+                    .collect();
+                let _ = self.event_tx.send(AppEvent::PlanUpdate(PlanView { entries }));
             }
             _ => {}
         }

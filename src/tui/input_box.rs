@@ -257,6 +257,9 @@ impl InputBox {
         // Write buffer to terminal
         let mut stdout = io::stdout();
         for y in area.top()..area.bottom() {
+            // Clear entire line first to remove any leaked content
+            execute!(stdout, cursor::MoveTo(0, y))?;
+            write!(stdout, "\x1b[2K")?;
             execute!(stdout, cursor::MoveTo(area.left(), y))?;
             for x in area.left()..area.right() {
                 let cell = &buf[(x, y)];

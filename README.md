@@ -1,6 +1,8 @@
 # Mythcode
 
-A lightweight Rust CLI for interacting with AI coding agents via the ACP (Agent Client Protocol). Currently supports [opencode](https://github.com/anomalyco/opencode).
+> A lightweight Rust CLI for interacting with AI coding agents via ACP (Agent Client Protocol).
+
+Currently supports [opencode](https://github.com/anomalyco/opencode).
 
 ## Features
 
@@ -14,7 +16,7 @@ A lightweight Rust CLI for interacting with AI coding agents via the ACP (Agent 
 ## Requirements
 
 - Rust stable
-- `opencode` installed and in `PATH`
+- [opencode](https://github.com/anomalyco/opencode) installed and in `PATH`
 
 ## Installation
 
@@ -24,7 +26,7 @@ cargo build --release
 
 The binary will be at `target/release/mythcode`. Add it to your PATH for convenience.
 
-## Usage
+## Quick Start
 
 ```bash
 # Interactive REPL
@@ -35,12 +37,11 @@ mythcode "explain this code"
 
 # Run against a specific project
 mythcode -p ./my-project "fix the tests"
-
-# Debug mode (verbose logging)
-mythcode --debug
 ```
 
-## REPL Commands
+## Usage
+
+### REPL Commands
 
 | Command | Description |
 |---------|-------------|
@@ -51,26 +52,34 @@ mythcode --debug
 | `/model` | Switch the AI model |
 | `/help` | Show available commands |
 
+### Debug Mode
+
+```bash
+mythcode --debug
+```
+
+Enable verbose logging for troubleshooting.
+
 ## Architecture
 
 ```
 src/
-├── main.rs          # Entry point
-├── cli.rs           # CLI argument parsing
-├── acp_client.rs    # ACP protocol client
-├── session.rs       # Session management
-├── process.rs       # Process handling
-├── input.rs         # Input handling
-├── types.rs         # Shared types
-└── tui/             # Terminal UI components
-    ├── history.rs   # Chat history
-    ├── input_box.rs # Input field
-    └── markdown.rs  # Markdown rendering
+├── main.rs          Entry point
+├── cli.rs           CLI argument parsing
+├── acp_client.rs    ACP protocol client
+├── session.rs       Session management
+├── process.rs       Process handling
+├── input.rs         Input handling
+├── types.rs         Shared types
+└── tui/             Terminal UI components
+    ├── history.rs   Chat history
+    ├── input_box.rs Input field
+    └── markdown.rs  Markdown rendering
 ```
 
 ## FAQ
 
-**Why does it take 6-7 seconds to start?**
+### Why does it take 6-7 seconds to start?
 
 The startup time comes from launching the ACP server and establishing the connection. This is inherent to how the ACP protocol works, not the mythcode implementation itself.
 

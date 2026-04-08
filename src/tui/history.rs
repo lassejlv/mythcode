@@ -1,6 +1,6 @@
 use similar::{ChangeTag, TextDiff};
 
-use crate::types::DiffPreview;
+use crate::types::{DiffPreview, PlanEntryStatus, PlanView};
 
 // Claude Code-inspired palette
 const C_RESET: &str = "\x1b[0m";
@@ -49,6 +49,8 @@ impl History {
 
     pub fn push(&mut self, content: String, line_type: LineType) {
         self.lines.push(RenderedLine { content, line_type });
+        // Auto-scroll to bottom when new content arrives
+        self.scroll_offset = 0;
     }
 
     pub fn push_lines(&mut self, lines: Vec<String>, line_type: LineType) {
@@ -68,12 +70,18 @@ impl History {
     }
 
     pub fn scroll_up(&mut self, amount: usize) {
-        let max = self.lines.len().saturating_sub(1);
+        // Don't scroll past the beginning — keep at least a few lines visible
+        let max = self.lines.len().saturating_sub(3);
         self.scroll_offset = (self.scroll_offset + amount).min(max);
     }
 
     pub fn scroll_down(&mut self, amount: usize) {
         self.scroll_offset = self.scroll_offset.saturating_sub(amount);
+    }
+
+    pub fn pop_n(&mut self, n: usize) {
+        let len = self.lines.len();
+        self.lines.truncate(len.saturating_sub(n));
     }
 
     pub fn clear(&mut self) {
@@ -129,7 +137,23 @@ pub fn format_tool_output(_title: &str, content: &str, total_lines: usize) -> Ve
     lines
 }
 
-/// Format a diff with box-drawing
+/// Format a plan/todo list
+pub fn format_plan(plan: &PlanView) -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push(format!("  {C_ACCENT}Plan{C_RESET}"));
+    for entry in &plan.entries {
+        let (icon, color) = match entry.status {
+            PlanEntryStatus::Completed => ("✓", C_GREEN),
+            PlanEntryStatus::InProgress => ("●", C_ACCENT),
+            PlanEntryStatus::Pending => ("○", C_DARK),
+        };
+        lines.push(format!("    {color}{icon}{C_RESET} {}{C_RESET}", entry.content));
+    }
+    lines.push(String::new());
+    lines
+}
+
+/// Format a diff — clean Claude Code style
 pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
     let mut lines = Vec::new();
     let path_display = diff.path.display();
@@ -137,26 +161,48 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
     let text_diff = TextDiff::from_lines(old_text, &diff.new_text);
     let groups = text_diff.grouped_ops(3);
 
+    // Count insertions and deletions
+    let mut insertions = 0usize;
+    let mut deletions = 0usize;
+    for group in &groups {
+        for op in group {
+            for change in text_diff.iter_changes(op) {
+                match change.tag() {
+                    ChangeTag::Insert => insertions += 1,
+                    ChangeTag::Delete => deletions += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // File header
+    let stats = if deletions == 0 {
+        format!("{C_GREEN}+{insertions}{C_RESET}")
+    } else if insertions == 0 {
+        format!("{C_RED}-{deletions}{C_RESET}")
+    } else {
+        format!("{C_GREEN}+{insertions}{C_RESET} {C_RED}-{deletions}{C_RESET}")
+    };
     lines.push(format!(
-        "  {C_DARK}╭─{C_RESET} {C_MAGENTA}{path_display}{C_RESET}"
+        "    {C_MAGENTA}{path_display}{C_RESET}  {C_DARK}({stats}{C_DARK}){C_RESET}"
     ));
 
     if groups.is_empty() {
-        lines.push(format!("  {C_DARK}│{C_RESET} {C_GRAY}(no changes){C_RESET}"));
+        lines.push(format!("    {C_DARK}(no changes){C_RESET}"));
+        return lines;
     }
 
     for (group_idx, group) in groups.iter().enumerate() {
         if let (Some(first), Some(last)) = (group.first(), group.last()) {
-            let old_start = first.old_range().start + 1;
-            let old_len = last.old_range().end - first.old_range().start;
             let new_start = first.new_range().start + 1;
             let new_len = last.new_range().end - first.new_range().start;
 
             if group_idx > 0 {
-                lines.push(format!("  {C_DARK}│{C_RESET}"));
+                lines.push(format!("    {C_DARK}⋯{C_RESET}"));
             }
             lines.push(format!(
-                "  {C_DARK}│{C_RESET} {C_DIM_CYAN}@@ -{old_start},{old_len} +{new_start},{new_len} @@{C_RESET}"
+                "    {C_DIM_CYAN}@@ {new_start},{new_len} @@{C_RESET}"
             ));
         }
 
@@ -173,17 +219,17 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                 let formatted = match change.tag() {
                     ChangeTag::Delete => {
                         format!(
-                            "  {C_DARK}│{C_RESET} {C_LINE_NO}{line_no}{C_RESET} {C_RED}-{change_trimmed}{C_RESET}"
+                            "    {C_LINE_NO}{line_no}{C_RESET} {C_RED}- {change_trimmed}{C_RESET}"
                         )
                     }
                     ChangeTag::Insert => {
                         format!(
-                            "  {C_DARK}│{C_RESET} {C_LINE_NO}{line_no}{C_RESET} {C_GREEN}+{change_trimmed}{C_RESET}"
+                            "    {C_LINE_NO}{line_no}{C_RESET} {C_GREEN}+ {change_trimmed}{C_RESET}"
                         )
                     }
                     ChangeTag::Equal => {
                         format!(
-                            "  {C_DARK}│ {C_LINE_NO}{line_no}{C_RESET}  {C_GRAY}{change_trimmed}{C_RESET}"
+                            "    {C_LINE_NO}{line_no}{C_RESET}   {C_DARK}{change_trimmed}{C_RESET}"
                         )
                     }
                 };
@@ -192,7 +238,6 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
         }
     }
 
-    lines.push(format!("  {C_DARK}╰─{C_RESET}"));
     lines
 }
 
