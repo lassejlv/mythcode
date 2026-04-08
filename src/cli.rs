@@ -15,7 +15,7 @@ use crate::types::{
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "mini-code", version, about = "Minimal ACP client for OpenCode")]
+#[command(name = "mythcode", version, about = "Minimal ACP client for OpenCode")]
 struct Args {
     #[arg(value_name = "PROMPT", trailing_var_arg = true)]
     prompt: Vec<String>,
@@ -45,8 +45,7 @@ pub async fn run() -> Result<()> {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let use_color =
-                input::is_interactive_terminal() && std::env::var("NO_COLOR").is_err();
+            let use_color = input::is_interactive_terminal() && std::env::var("NO_COLOR").is_err();
 
             let connected = AcpClient::connect(&config).await?;
             let mut client = connected.client;
@@ -57,7 +56,14 @@ pub async fn run() -> Result<()> {
             let result = if let Some(prompt) = &config.prompt {
                 run_one_shot(&client, &mut events, &mut renderer, &mut signals, prompt).await
             } else {
-                run_repl(&mut client, &mut events, &mut renderer, &mut signals, use_color).await
+                run_repl(
+                    &mut client,
+                    &mut events,
+                    &mut renderer,
+                    &mut signals,
+                    use_color,
+                )
+                .await
             };
 
             client.shutdown().await;
@@ -101,13 +107,7 @@ async fn run_repl(
             .models()
             .current_model_id
             .as_deref()
-            .or_else(|| {
-                session
-                    .models()
-                    .available
-                    .first()
-                    .map(|m| m.name.as_str())
-            });
+            .or_else(|| session.models().available.first().map(|m| m.name.as_str()));
         renderer.print_welcome(project_name, model_name);
 
         loop {

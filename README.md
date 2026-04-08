@@ -1,4 +1,4 @@
-# mini-code
+# Mythcode
 
 A Rust CLI that talks to AI-agents over ACP.
 
@@ -19,16 +19,16 @@ cargo build --release
 
 ```bash
 # Interactive REPL
-mini-code
+mythcode
 
 # One-shot prompt
-mini-code "explain this repo"
+mythcode "explain this repo"
 
 # Run against a project
-mini-code -p ./project "fix the tests"
+mythcode -p ./project "fix the tests"
 
 # Debug mode
-mini-code --debug
+mythcode --debug
 ```
 
 ## REPL commands

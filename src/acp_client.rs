@@ -95,7 +95,7 @@ impl AcpClient {
 
         let initialize = acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_info(
             acp::Implementation::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
-                .title("mini-code"),
+                .title("mythcode"),
         );
 
         if let Err(error) = conn.initialize(initialize).await {

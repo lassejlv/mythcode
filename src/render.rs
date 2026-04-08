@@ -53,7 +53,7 @@ impl Renderer {
 
     pub fn print_welcome(&self, project_name: &str, model: Option<&str>) {
         if !self.color {
-            println!("mini-code · {project_name}");
+            println!("mythcode · {project_name}");
             if let Some(model) = model {
                 println!("model: {model}");
             }
@@ -62,15 +62,11 @@ impl Renderer {
         }
 
         println!();
-        println!(
-            "  {BOLD_CYAN}mini-code{RESET} {DIM}·{RESET} {BOLD}{project_name}{RESET}"
-        );
+        println!("  {BOLD_CYAN}mythcode{RESET} {DIM}·{RESET} {BOLD}{project_name}{RESET}");
         if let Some(model) = model {
             println!("  {DIM}model: {model}{RESET}");
         }
-        println!(
-            "  {DIM}type {RESET}/help{DIM} for commands{RESET}"
-        );
+        println!("  {DIM}type {RESET}/help{DIM} for commands{RESET}");
         println!();
     }
 
@@ -260,9 +256,7 @@ impl Renderer {
                     if group_idx > 0 {
                         println!("  |");
                     }
-                    println!(
-                        "  | @@ -{old_start},{old_len} +{new_start},{new_len} @@"
-                    );
+                    println!("  | @@ -{old_start},{old_len} +{new_start},{new_len} @@");
                 }
             }
 
@@ -270,9 +264,7 @@ impl Renderer {
                 for change in text_diff.iter_changes(op) {
                     let line_no = match change.tag() {
                         ChangeTag::Delete => format_line_no(change.old_index()),
-                        ChangeTag::Insert | ChangeTag::Equal => {
-                            format_line_no(change.new_index())
-                        }
+                        ChangeTag::Insert | ChangeTag::Equal => format_line_no(change.new_index()),
                     };
 
                     if self.color {
@@ -288,9 +280,7 @@ impl Renderer {
                                 );
                             }
                             ChangeTag::Equal => {
-                                print!(
-                                    "  {DIM}│ {line_no}  {change}{RESET}"
-                                );
+                                print!("  {DIM}│ {line_no}  {change}{RESET}");
                             }
                         }
                     } else {
