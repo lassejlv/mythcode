@@ -126,6 +126,7 @@ pub struct Tui {
     printed_text: bool,
     project_name: String,
     current_mode: Option<String>,
+    current_model: Option<String>,
     last_tool_outputs: Vec<ToolOutputView>,
     live_output_lines: usize,
     message_queue: Vec<String>,
@@ -159,6 +160,7 @@ impl Tui {
             printed_text: false,
             project_name: String::new(),
             current_mode: None,
+            current_model: None,
             last_tool_outputs: Vec::new(),
             live_output_lines: 0,
             message_queue: Vec::new(),
@@ -186,8 +188,9 @@ impl Tui {
             .or_else(|| session.models().available.first().map(|m| m.name.as_str()))
             .map(|s| s.to_string());
 
-        // Set initial mode
+        // Set initial mode and model
         self.current_mode = session.current_mode().map(|s| s.to_string());
+        self.current_model = model_name.clone();
 
         // Welcome
         self.history.push(String::new(), LineType::Welcome);
@@ -666,6 +669,7 @@ impl Tui {
                                 let id = item.id.clone();
                                 let name = item.display.clone();
                                 client.set_model(&id).await?;
+                                self.current_model = Some(id);
                                 self.history.push(
                                     format_status(&format!("model → {name}")),
                                     LineType::Status,
@@ -821,7 +825,7 @@ impl Tui {
                 self.redraw()?;
                 return Ok(KeyAction::Continue);
             }
-            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            KeyCode::Enter if key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => {
                 self.input.insert_newline();
             }
             KeyCode::Enter => {
@@ -1205,9 +1209,26 @@ impl Tui {
         let is_active = self.pending_permission.is_none() && self.select_mode.is_none();
         self.input.render(input_row, w, input_box_h, &title, is_active)?;
 
+        // Model info line below input box
+        let model_line_h: u16 = if self.current_model.is_some() { 1 } else { 0 };
+        let model_row = input_row + input_box_h;
+        if let Some(ref model) = self.current_model {
+            if model_row < h {
+                let mut stdout = io::stdout();
+                let mode_hint = if self.current_mode.is_some() {
+                    format!("  {C_DARK}shift+tab to switch mode{C_RESET}")
+                } else {
+                    String::new()
+                };
+                execute!(stdout, cursor::MoveTo(0, model_row))?;
+                write!(stdout, "\x1b[2K   {C_DARK}{model}{mode_hint}{C_RESET}")?;
+                stdout.flush()?;
+            }
+        }
+
         // Suggestions: render below if room, otherwise above the input box
         let suggestion_count = self.suggestions.len().min(8) as u16;
-        let below_start = input_row + input_box_h;
+        let below_start = input_row + input_box_h + model_line_h;
         let room_below = h.saturating_sub(below_start);
         let render_above = suggestion_count > 0 && room_below < suggestion_count;
 
