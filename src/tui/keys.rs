@@ -46,23 +46,17 @@ impl Tui {
                             }
                             SelectKind::Resume => {
                                 let id = item.id.clone();
-
-                                // Clear history before resume — the agent will
-                                // replay the conversation as session/update
-                                // notifications which flow through the normal
-                                // event loop and populate the history.
-                                self.history.clear();
-                                self.last_activity = None;
-                                self.last_tool_outputs.clear();
-                                self.live_output_lines = 0;
-
+                                let name = item.display.clone();
                                 client.resume_session(&id).await?;
                                 self.current_mode = client.session_snapshot().current_mode().map(|s| s.to_string());
-                                self.current_model = client.session_snapshot()
-                                    .models()
-                                    .current_model_id
-                                    .clone();
                                 *file_index = crate::cli::build_file_index(client.session_snapshot().cwd());
+                                self.history.clear();
+                                self.history.push(String::new(), LineType::Status);
+                                self.history.push(
+                                    format_status(&format!("resumed: {name}")),
+                                    LineType::Status,
+                                );
+                                self.history.push(String::new(), LineType::Status);
                             }
                         }
                     }
