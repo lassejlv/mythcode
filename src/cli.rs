@@ -44,7 +44,9 @@ pub async fn run() -> Result<()> {
         Some("claude") => AcpProvider::Claude,
         Some("pi") => AcpProvider::Pi,
         Some(other) => {
-            anyhow::bail!("unknown provider `{other}`. Use `opencode`, `codex`, `claude`, or `pi`.");
+            anyhow::bail!(
+                "unknown provider `{other}`. Use `opencode`, `codex`, `claude`, or `pi`."
+            );
         }
         None if input::is_interactive_terminal() => pick_provider()?,
         None => AcpProvider::OpenCode,
@@ -77,7 +79,9 @@ pub async fn run() -> Result<()> {
                 // Interactive TUI mode
                 let mut file_index = build_file_index(client.session_snapshot().cwd());
                 let mut tui = Tui::new();
-                let result = tui.run(&mut client, &mut events, &mut signals, &mut file_index).await;
+                let result = tui
+                    .run(&mut client, &mut events, &mut signals, &mut file_index)
+                    .await;
                 client.shutdown().await;
                 result
             } else {
@@ -297,7 +301,9 @@ async fn connect_with_loading(config: &AppConfig) -> Result<crate::acp_client::C
     let connect_future = AcpClient::connect(config);
     tokio::pin!(connect_future);
 
-    let mut interval = tokio::time::interval(std::time::Duration::from_millis(crate::spinner::INTERVAL_MS));
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(
+        crate::spinner::INTERVAL_MS,
+    ));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     let result = loop {
@@ -379,7 +385,7 @@ fn pick_provider() -> Result<AcpProvider> {
             provider: AcpProvider::Claude,
             name: "Claude Code",
             package: "@agentclientprotocol/claude-agent-acp",
-            description: "Anthropic's Claude with full coding capabilities",
+            description: "Anthropic's Claude Code with full coding capabilities",
             color: ORANGE,
             icon: "◆",
         },
@@ -395,7 +401,7 @@ fn pick_provider() -> Result<AcpProvider> {
             provider: AcpProvider::Codex,
             name: "Codex",
             package: "@zed-industries/codex-acp",
-            description: "OpenAI Codex agent by Zed",
+            description: "OpenAI Codex agent by OpenAI",
             color: CYAN,
             icon: "◈",
         },
@@ -436,7 +442,10 @@ fn pick_provider() -> Result<AcpProvider> {
         writeln!(stdout, "  {BOLD_CYAN}mythcode{RESET}\r")?;
         row += 1;
         execute!(stdout, cursor::MoveTo(0, row))?;
-        writeln!(stdout, "  {GRAY}Select a coding agent to connect to{RESET}\r")?;
+        writeln!(
+            stdout,
+            "  {GRAY}Select a coding agent to connect to{RESET}\r"
+        )?;
         row += 1;
         execute!(stdout, cursor::MoveTo(0, row))?;
         writeln!(stdout, "\r")?;
@@ -474,18 +483,18 @@ fn pick_provider() -> Result<AcpProvider> {
                     desc = entry.description,
                 )?;
             } else {
-                writeln!(stdout, "       {DIM}{desc}{RESET}\r", desc = entry.description)?;
+                writeln!(
+                    stdout,
+                    "       {DIM}{desc}{RESET}\r",
+                    desc = entry.description
+                )?;
             }
             row += 1;
 
             // Show package name for selected item
             execute!(stdout, cursor::MoveTo(0, row))?;
             if is_selected {
-                writeln!(
-                    stdout,
-                    "       {DIM}{pkg}{RESET}\r",
-                    pkg = entry.package,
-                )?;
+                writeln!(stdout, "       {DIM}{pkg}{RESET}\r", pkg = entry.package,)?;
             } else {
                 writeln!(stdout, "\r")?;
             }
@@ -497,10 +506,7 @@ fn pick_provider() -> Result<AcpProvider> {
         writeln!(stdout, "\r")?;
         row += 1;
         execute!(stdout, cursor::MoveTo(0, row))?;
-        writeln!(
-            stdout,
-            "  {DIM}↑↓ navigate  enter select  q quit{RESET}\r"
-        )?;
+        writeln!(stdout, "  {DIM}↑↓ navigate  enter select  q quit{RESET}\r")?;
         row += 1;
         execute!(stdout, cursor::MoveTo(0, row))?;
         writeln!(
