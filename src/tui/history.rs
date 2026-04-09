@@ -99,16 +99,33 @@ impl History {
 pub fn format_user_message(message: &str) -> Vec<String> {
     vec![
         String::new(),
-        format!("  {C_ACCENT}>{C_RESET} \x1b[1m{message}\x1b[0m"),
-        String::new(),
+        format!("  {C_ACCENT}❯{C_RESET} \x1b[1m{message}\x1b[0m"),
     ]
+}
+
+/// Turn separator — subtle line between conversation turns
+pub fn format_turn_separator(elapsed: &str) -> Vec<String> {
+    if elapsed.is_empty() {
+        vec![String::new()]
+    } else {
+        vec![
+            format!("  {C_DARK}· {elapsed}{C_RESET}"),
+            String::new(),
+        ]
+    }
 }
 
 /// Activity line: tool calls, mode changes, etc.
 pub fn format_activity(activity: &str) -> String {
-    // Shorten file paths in activity text to just filename
+    // Shorten file paths and truncate long commands
     let short = shorten_activity(activity);
-    format!("  {C_DARK}  {short}{C_RESET}")
+    let truncated = if short.chars().count() > 60 {
+        let s: String = short.chars().take(57).collect();
+        format!("{s}…")
+    } else {
+        short
+    };
+    format!("  {C_DARK}  {truncated}{C_RESET}")
 }
 
 /// Warning line
@@ -154,16 +171,27 @@ const TOOL_OUTPUT_MAX_LINES: usize = 4;
 pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec<String> {
     let mut lines = Vec::new();
 
-    // Determine tool kind from title for icon
-    let (icon, label) = tool_icon_and_label(title);
+    let icon = tool_icon(title);
 
-    // Title header with icon and shortened path
-    if !title.is_empty() {
-        let short_title = shorten_activity(title);
-        lines.push(format!(
-            "  {C_ACCENT}{icon}{C_RESET} {C_WHITE}{label}{C_RESET} {C_GRAY}{short_title}{C_RESET}"
-        ));
-    }
+    // Shorten the title (paths get shortened, long strings truncated)
+    let short_title = shorten_activity(title);
+    let display_title = if short_title.chars().count() > 60 {
+        let s: String = short_title.chars().take(57).collect();
+        format!("{s}…")
+    } else {
+        short_title
+    };
+
+    // Line count tag
+    let lines_tag = if total_lines > 0 {
+        format!("  {C_DARK}{total_lines} lines{C_RESET}")
+    } else {
+        String::new()
+    };
+
+    lines.push(format!(
+        "  {C_ACCENT}{icon}{C_RESET} {C_WHITE}{display_title}{C_RESET}{lines_tag}"
+    ));
 
     let preview_lines: Vec<&str> = content.lines().take(TOOL_OUTPUT_MAX_LINES).collect();
     let shown = preview_lines.len();
@@ -177,12 +205,15 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
         let mut hl = Highlighter::new(ext);
 
         lines.push(format!("    {C_DARK}╭───{C_RESET}"));
-        for line in &preview_lines {
+        for (i, line) in preview_lines.iter().enumerate() {
+            let line_no = format!("{:>3}", i + 1);
             let colored = hl
                 .as_mut()
                 .and_then(|h| h.highlight_line(line))
                 .unwrap_or_else(|| format!("{C_DARK}{line}{C_RESET}"));
-            lines.push(format!("    {C_DARK}│{C_RESET}  {colored}"));
+            lines.push(format!(
+                "    {C_DARK}│{C_RESET} {C_LINE_NO}{line_no}{C_RESET}  {colored}"
+            ));
         }
         if total_lines > shown {
             let remaining = total_lines - shown;
@@ -341,27 +372,25 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
     lines
 }
 
-/// Map tool titles to icons and short labels
-fn tool_icon_and_label(title: &str) -> (&'static str, &'static str) {
+/// Map tool titles to icons
+fn tool_icon(title: &str) -> &'static str {
     let lower = title.to_lowercase();
     if lower.starts_with("read") {
-        ("◇", "Read")
+        "◇"
     } else if lower.starts_with("edit") {
-        ("◆", "Edit")
+        "◆"
     } else if lower.starts_with("write") {
-        ("+", "Write")
-    } else if lower.starts_with("bash") || lower.starts_with("run") {
-        ("$", "Bash")
-    } else if lower.starts_with("grep") || lower.starts_with("search") {
-        ("⌕", "Search")
-    } else if lower.starts_with("glob") || lower.starts_with("find") {
-        ("⌕", "Find")
-    } else if lower.starts_with("agent") || lower.starts_with("launch") {
-        ("→", "Agent")
+        "+"
+    } else if lower.starts_with("bash") || lower.starts_with("run") || lower.starts_with("exec") {
+        "$"
+    } else if lower.starts_with("grep") || lower.starts_with("search") || lower.starts_with("glob") || lower.starts_with("find") {
+        "⌕"
+    } else if lower.starts_with("agent") || lower.starts_with("launch") || lower.starts_with("task") {
+        "→"
     } else if lower.starts_with("web") {
-        ("↗", "Web")
+        "↗"
     } else {
-        ("▸", "Tool")
+        "▸"
     }
 }
 

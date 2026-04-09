@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-    KeyboardEnhancementFlags, MouseEventKind, PopKeyboardEnhancementFlags,
+    Event, KeyCode, KeyEventKind, KeyModifiers,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
     PushKeyboardEnhancementFlags,
 };
 use crossterm::{cursor, execute, terminal};
@@ -175,7 +175,7 @@ impl Tui {
         execute!(
             io::stdout(),
             terminal::EnterAlternateScreen,
-            EnableMouseCapture,
+            crossterm::event::EnableMouseCapture,
             cursor::Show,
         )?;
 
@@ -242,16 +242,12 @@ impl Tui {
                                 }
                             }
                             Event::Mouse(mouse) => {
-                                match mouse.kind {
-                                    MouseEventKind::ScrollUp => {
-                                        self.history.scroll_up(3);
-                                        self.redraw()?;
-                                    }
-                                    MouseEventKind::ScrollDown => {
-                                        self.history.scroll_down(3);
-                                        self.redraw()?;
-                                    }
-                                    _ => {}
+                                if let crossterm::event::MouseEventKind::ScrollUp = mouse.kind {
+                                    self.history.scroll_up(3);
+                                    self.redraw()?;
+                                } else if let crossterm::event::MouseEventKind::ScrollDown = mouse.kind {
+                                    self.history.scroll_down(3);
+                                    self.redraw()?;
                                 }
                             }
                             Event::Resize(w, h) => {
@@ -431,16 +427,12 @@ impl Tui {
                                 _ => {}
                             },
                             Event::Mouse(mouse) => {
-                                match mouse.kind {
-                                    MouseEventKind::ScrollUp => {
-                                        self.history.scroll_up(3);
-                                        self.redraw()?;
-                                    }
-                                    MouseEventKind::ScrollDown => {
-                                        self.history.scroll_down(3);
-                                        self.redraw()?;
-                                    }
-                                    _ => {}
+                                if let crossterm::event::MouseEventKind::ScrollUp = mouse.kind {
+                                    self.history.scroll_up(3);
+                                    self.redraw()?;
+                                } else if let crossterm::event::MouseEventKind::ScrollDown = mouse.kind {
+                                    self.history.scroll_down(3);
+                                    self.redraw()?;
                                 }
                             }
                             Event::Resize(w, h) => {
@@ -479,7 +471,6 @@ impl Tui {
         }
         let _ = execute!(
             io::stdout(),
-            DisableMouseCapture,
             terminal::LeaveAlternateScreen,
             cursor::SetCursorStyle::DefaultUserShape,
         );

@@ -5,12 +5,12 @@ use std::time::Instant;
 use crate::types::{AppEvent, PermissionDecision};
 
 use super::history::{
-    format_activity, format_diff, format_plan, format_status, format_tool_output,
-    format_user_message, format_warning, LineType,
+    format_activity, format_diff, format_plan, format_tool_output,
+    format_turn_separator, format_user_message, format_warning, LineType,
 };
 use super::markdown::wrap_ansi;
 use super::permission::PendingPermission;
-use super::{C_DARK, C_DIM, C_RESET, Tui};
+use super::{C_DIM, C_RESET, Tui};
 
 impl Tui {
     // ── Event handling ──────────────────────────────────────────────
@@ -81,10 +81,14 @@ impl Tui {
                 self.history.push_lines(lines, LineType::Diff);
             }
             AppEvent::ToolOutput(output) => {
-                // Replace previous live output lines
-                if self.live_output_lines > 0 {
-                    self.history.pop_n(self.live_output_lines);
-                }
+                // Replace previous live output lines (including the activity line)
+                let pop_count = if self.live_output_lines > 0 {
+                    self.live_output_lines
+                } else {
+                    // First output for this tool — pop the activity announcement line
+                    1
+                };
+                self.history.pop_n(pop_count);
                 let lines = format_tool_output(&output.title, &output.content, output.total_lines);
                 self.live_output_lines = lines.len();
                 self.history.push_lines(lines, LineType::Activity);
@@ -236,21 +240,16 @@ impl Tui {
             .map(|t| crate::spinner::format_elapsed(t.elapsed().as_secs()))
             .unwrap_or_default();
 
-        if matches!(
+        let display_elapsed = if matches!(
             result.stop_reason,
             agent_client_protocol::StopReason::Cancelled
         ) {
-            self.history.push(
-                format_status(&format!("cancelled · {elapsed}")),
-                LineType::Status,
-            );
-        } else if !elapsed.is_empty() {
-            self.history.push(
-                format!("  {C_DARK}· {elapsed}{C_RESET}"),
-                LineType::Status,
-            );
-        }
-        self.history.push(String::new(), LineType::Separator);
+            format!("cancelled · {elapsed}")
+        } else {
+            elapsed
+        };
+        let sep_lines = format_turn_separator(&display_elapsed);
+        self.history.push_lines(sep_lines, LineType::Separator);
         self.turn_start = None;
         self.tool_active = false;
     }

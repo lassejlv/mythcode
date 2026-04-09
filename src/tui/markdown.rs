@@ -1,30 +1,38 @@
 /// Streaming markdown-to-ANSI renderer.
 /// Handles: **bold**, *italic*, `inline code`, # headers, - lists, fenced code blocks.
-/// Uses 256-color ANSI for a muted, clean palette.
+/// Uses Catppuccin Mocha palette for a clean, modern look.
 
 use unicode_width::UnicodeWidthChar;
 
-// Claude Code-inspired palette
+use super::highlight::Highlighter;
+
+// Catppuccin Mocha palette
 const C_RESET: &str = "\x1b[0m";
-const C_BOLD: &str = "\x1b[1m";             // terminal default bold white
+const C_BOLD: &str = "\x1b[1m";
 const C_ITALIC: &str = "\x1b[3m";
-const C_CODE_INLINE: &str = "\x1b[38;5;209m"; // warm orange like Claude Code
+const C_CODE_INLINE: &str = "\x1b[38;2;166;227;161m";        // green — stands out inline
+const C_CODE_INLINE_BG: &str = "\x1b[48;2;30;40;35m";        // subtle green tint bg
 const C_CODE_BLOCK: &str = "\x1b[38;5;248m";
 const C_CODE_FENCE: &str = "\x1b[38;5;240m";
-const C_HEADER1: &str = "\x1b[1;38;5;75m";  // bright blue
-const C_HEADER2: &str = "\x1b[1m";
+const C_HEADER1: &str = "\x1b[1;38;2;137;180;250m";          // bold blue
+const C_HEADER2: &str = "\x1b[1;38;2;205;214;244m";          // bold text
 const C_HEADER3: &str = "\x1b[1;38;5;249m";
-const C_BULLET: &str = "\x1b[38;5;245m";
-const C_THINKING: &str = "\x1b[3;38;5;239m"; // dark italic — clearly subordinate to body text
+const C_BULLET: &str = "\x1b[38;2;137;180;250m";             // blue bullets
+const C_THINKING: &str = "\x1b[38;2;88;91;112m";             // overlay0 — subtle
+const C_THINKING_BAR: &str = "\x1b[38;2;69;71;90m";          // surface1
 
 pub struct MarkdownParser {
     in_code_block: bool,
+    code_lang: String,
+    code_highlighter: Option<Highlighter>,
 }
 
 impl MarkdownParser {
     pub fn new() -> Self {
         Self {
             in_code_block: false,
+            code_lang: String::new(),
+            code_highlighter: None,
         }
     }
 
@@ -32,13 +40,38 @@ impl MarkdownParser {
     pub fn render_line(&mut self, line: &str) -> String {
         // Fenced code block toggle
         if line.trim_start().starts_with("```") {
-            self.in_code_block = !self.in_code_block;
-            return format!("  {C_CODE_FENCE}{line}{C_RESET}");
+            if self.in_code_block {
+                // Closing fence
+                self.in_code_block = false;
+                self.code_lang.clear();
+                self.code_highlighter = None;
+                return format!("  {C_CODE_FENCE}  ╰───{C_RESET}");
+            } else {
+                // Opening fence — extract language
+                self.in_code_block = true;
+                let lang = line.trim_start().trim_start_matches('`').trim();
+                self.code_lang = lang.to_string();
+                self.code_highlighter = if !lang.is_empty() {
+                    Highlighter::new(lang)
+                } else {
+                    None
+                };
+                let lang_label = if lang.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {C_CODE_FENCE}{lang}{C_RESET}")
+                };
+                return format!("  {C_CODE_FENCE}  ╭───{lang_label}{C_RESET}");
+            }
         }
 
-        // Inside code block: monospace gray
+        // Inside code block: syntax highlighted
         if self.in_code_block {
-            return format!("  {C_CODE_BLOCK}  {line}{C_RESET}");
+            let colored = self.code_highlighter
+                .as_mut()
+                .and_then(|h| h.highlight_line(line))
+                .unwrap_or_else(|| format!("{C_CODE_BLOCK}{line}{C_RESET}"));
+            return format!("  {C_CODE_FENCE}  │{C_RESET} {colored}");
         }
 
         let trimmed = line.trim_start();
@@ -56,7 +89,7 @@ impl MarkdownParser {
 
         // Horizontal rule
         if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-            return format!("  {C_CODE_FENCE}────────────────────{C_RESET}");
+            return format!("  {C_CODE_FENCE}─────────────────────────{C_RESET}");
         }
 
         // Unordered list items
@@ -78,7 +111,7 @@ impl MarkdownParser {
         // Blockquote
         if let Some(rest) = trimmed.strip_prefix("> ") {
             let rendered = render_inline(rest);
-            return format!("  {C_CODE_FENCE}│{C_RESET} {C_HEADER3}{rendered}{C_RESET}");
+            return format!("  {C_THINKING_BAR}│{C_RESET} {C_ITALIC}{rendered}{C_RESET}");
         }
 
         // Regular paragraph text
@@ -90,12 +123,12 @@ impl MarkdownParser {
         }
     }
 
-    /// Render thinking text (dim + italic + muted)
+    /// Render thinking text — dim with a left bar
     pub fn render_thinking_line(&self, line: &str) -> String {
         if line.is_empty() {
-            return String::new();
+            return format!("  {C_THINKING_BAR}│{C_RESET}");
         }
-        format!("  {C_THINKING}{line}{C_RESET}")
+        format!("  {C_THINKING_BAR}│{C_RESET} {C_THINKING}{line}{C_RESET}")
     }
 }
 
@@ -133,12 +166,15 @@ fn render_inline(text: &str) -> String {
             }
         }
 
-        // `inline code`
+        // `inline code` — with background tint
         if chars[i] == '`' {
             if let Some(end) = find_closing_single(&chars, i + 1, '`') {
+                result.push_str(C_CODE_INLINE_BG);
                 result.push_str(C_CODE_INLINE);
+                result.push(' ');
                 let inner: String = chars[i + 1..end].iter().collect();
                 result.push_str(&inner);
+                result.push(' ');
                 result.push_str(C_RESET);
                 i = end + 1;
                 continue;

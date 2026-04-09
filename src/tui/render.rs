@@ -118,46 +118,81 @@ impl Tui {
             };
             let shimmer = crate::spinner::shimmer(self.spinner_frame, status_msg);
 
+            // Truncate tool hint to keep the spinner line clean
+            let short_hint = if tool_hint.len() > 40 {
+                let truncated: String = tool_hint.chars().take(37).collect();
+                format!("{truncated}…")
+            } else {
+                tool_hint.to_string()
+            };
+
             execute!(stdout, cursor::MoveTo(0, extra_row))?;
-            if tool_hint.is_empty() {
+            if short_hint.is_empty() {
                 write!(stdout, "\x1b[2K  {C_SPINNER}{frame}{C_RESET}  {shimmer}  {C_DARK}{timer}{C_RESET}")?;
             } else {
-                write!(stdout, "\x1b[2K  {C_SPINNER}{frame}{C_RESET}  {shimmer}  {C_DIM}{tool_hint}{C_RESET}  {C_DARK}{timer}{C_RESET}")?;
+                write!(stdout, "\x1b[2K  {C_SPINNER}{frame}{C_RESET}  {shimmer}  {C_DIM}{short_hint}{C_RESET}  {C_DARK}{timer}{C_RESET}")?;
             }
         }
 
         // Permission options (rendered between history and input)
         if let Some(ref perm) = self.pending_permission {
-            // Green/red background colors for accept/reject
-            const BG_GREEN: &str = "\x1b[48;5;22m";  // dark green bg
-            const BG_RED: &str = "\x1b[48;5;52m";    // dark red bg
-            const FG_GREEN: &str = "\x1b[38;5;114m";
-            const FG_RED: &str = "\x1b[38;5;174m";
-            const FG_WHITE: &str = "\x1b[38;5;255m";
+            const BG_GREEN: &str = "\x1b[48;2;20;50;30m";
+            const BG_RED: &str = "\x1b[48;2;60;20;25m";
+            const FG_GREEN: &str = "\x1b[38;2;166;227;161m";
+            const FG_RED: &str = "\x1b[38;2;243;139;168m";
+            const FG_WHITE: &str = "\x1b[38;2;205;214;244m";
             const BG_RESET: &str = "\x1b[49m";
 
-            let hint = format!("{C_DIM}↑↓ select · enter confirm · esc cancel{C_RESET}");
-            let perm_start = input_row.saturating_sub(perm.options.len() as u16 + 1);
-            execute!(stdout, cursor::MoveTo(0, perm_start))?;
-            write!(stdout, "\x1b[2K  {hint}")?;
+            // Layout: blank + hint + blank + options (each padded)
+            let total_rows = perm.options.len() as u16 + 3; // hint + blank + options + blank
+            let perm_start = input_row.saturating_sub(total_rows);
+
+            let mut row = perm_start;
+
+            // Blank line
+            if row < input_row {
+                execute!(stdout, cursor::MoveTo(0, row))?;
+                write!(stdout, "\x1b[2K")?;
+                row += 1;
+            }
+
+            // Hint
+            if row < input_row {
+                execute!(stdout, cursor::MoveTo(0, row))?;
+                write!(stdout, "\x1b[2K  {C_DIM}↑↓ select · enter confirm · esc cancel{C_RESET}")?;
+                row += 1;
+            }
+
+            // Blank line
+            if row < input_row {
+                execute!(stdout, cursor::MoveTo(0, row))?;
+                write!(stdout, "\x1b[2K")?;
+                row += 1;
+            }
+
+            // Options
             for (i, opt) in perm.options.iter().enumerate() {
-                let row = perm_start + 1 + i as u16;
                 if row >= input_row {
                     break;
                 }
                 execute!(stdout, cursor::MoveTo(0, row))?;
                 let is_accept = opt.kind.is_accept();
+                let label = &opt.name;
+
                 if i == perm.selected {
                     let (bg, fg) = if is_accept {
                         (BG_GREEN, FG_WHITE)
                     } else {
                         (BG_RED, FG_WHITE)
                     };
-                    write!(stdout, "\x1b[2K  {bg}{fg} ▸ {opt} {BG_RESET}{C_RESET}")?;
+                    // Pad the label to create a wider background pill
+                    let padded = format!(" ▸ {label} ");
+                    write!(stdout, "\x1b[2K  {bg}{fg}{padded}{BG_RESET}{C_RESET}")?;
                 } else {
                     let fg = if is_accept { FG_GREEN } else { FG_RED };
-                    write!(stdout, "\x1b[2K    {fg}{opt}{C_RESET}")?;
+                    write!(stdout, "\x1b[2K    {fg}{label}{C_RESET}")?;
                 }
+                row += 1;
             }
         }
 
