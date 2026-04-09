@@ -30,13 +30,13 @@ const features = [
 ]
 
 const installOptions = [
+  { id: 'brew', label: 'brew', cmd: 'brew install lassejlv/mythcode/mythcode' },
   { id: 'npm', label: 'npm', cmd: 'npm install -g @mythcode/cli' },
   { id: 'bun', label: 'bun', cmd: 'bun install -g @mythcode/cli' },
-  { id: 'binary', label: 'binary', cmd: 'curl -fsSL https://github.com/lassejlv/mythcode/releases/latest/download/install.sh | sh' },
 ] as const
 
 export function HomePage() {
-  const [activeTab, setActiveTab] = useState<string>('npm')
+  const [activeTab, setActiveTab] = useState<string>('brew')
   const [copied, setCopied] = useState(false)
 
   const activeCmd = installOptions.find(o => o.id === activeTab)!
