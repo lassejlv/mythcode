@@ -57,23 +57,23 @@
 /* Catppuccin Mocha dark theme as default */
 :root {
   --radius: 0.625rem;
-  --background: #1e1e2e;
+  --background: #11111b;
   --foreground: #cdd6f4;
   --card: #181825;
   --card-foreground: #cdd6f4;
   --popover: #181825;
   --popover-foreground: #cdd6f4;
   --primary: #89b4fa;
-  --primary-foreground: #1e1e2e;
-  --secondary: #313244;
+  --primary-foreground: #11111b;
+  --secondary: #1e1e2e;
   --secondary-foreground: #cdd6f4;
-  --muted: #313244;
+  --muted: #1e1e2e;
   --muted-foreground: #6c7086;
-  --accent: #313244;
+  --accent: #1e1e2e;
   --accent-foreground: #cdd6f4;
   --destructive: #f38ba8;
-  --border: #313244;
-  --input: #313244;
+  --border: #262637;
+  --input: #1e1e2e;
   --ring: #89b4fa;
   --chart-1: #89b4fa;
   --chart-2: #a6e3a1;
