@@ -302,10 +302,15 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                 let change_str = change.to_string_lossy();
                 let change_trimmed = change_str.trim_end_matches('\n');
 
+                // Background colors for diff lines
+                const BG_RED: &str = "\x1b[48;2;60;20;25m";
+                const BG_GREEN: &str = "\x1b[48;2;20;50;30m";
+                const BG_RESET: &str = "\x1b[49m";
+
                 let formatted = match change.tag() {
                     ChangeTag::Delete => {
                         format!(
-                            "    {C_DARK}│{C_RESET} {C_LINE_NO}{line_no}{C_RESET} {C_RED}- {change_trimmed}{C_RESET}"
+                            "    {C_DARK}│{C_RESET}{BG_RED} {C_LINE_NO}{line_no}{C_RESET}{BG_RED} {C_RED}- {change_trimmed}{C_RESET}{BG_RESET}"
                         )
                     }
                     ChangeTag::Insert => {
@@ -314,7 +319,7 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                             .and_then(|h| h.highlight_line(change_trimmed))
                             .unwrap_or_else(|| format!("{C_GREEN}{change_trimmed}{C_RESET}"));
                         format!(
-                            "    {C_DARK}│{C_RESET} {C_LINE_NO}{line_no}{C_RESET} {C_GREEN}+ {C_RESET}{highlighted}"
+                            "    {C_DARK}│{C_RESET}{BG_GREEN} {C_LINE_NO}{line_no}{C_RESET}{BG_GREEN} {C_GREEN}+ {C_RESET}{BG_GREEN}{highlighted}{BG_RESET}"
                         )
                     }
                     ChangeTag::Equal => {

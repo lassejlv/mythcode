@@ -66,9 +66,8 @@ impl Tui {
                 self.spinner_active = true;
             }
             AppEvent::ModeChanged(mode) => {
-                self.stop_spinner();
-                self.flush_assistant();
-                self.flush_thinking();
+                // Don't stop the spinner — mode changes often arrive at
+                // the start of a turn before any content.
                 self.current_mode = Some(mode);
             }
             AppEvent::SessionTitle(_title) => {
