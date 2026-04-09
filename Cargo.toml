@@ -2,11 +2,35 @@
 name = "mythcode"
 version = "0.1.0"
 edition = "2024"
+description = "A fast Rust CLI for talking to ACP-compatible coding agents from your terminal."
+readme = "README.md"
+repository = "https://github.com/lassejlv/minicode"
 
 [[bin]]
 name = "mythcode"
 path = "src/main.rs"
 
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.31.0"
+ci = ["github"]
+installers = ["npm"]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+hosting = "github"
+publish-jobs = ["npm"]
+pr-run-mode = "plan"
+
+[package.metadata.dist]
+npm-scope = "@mythcode"
+npm-package = "cli"
 
 [dependencies]
 agent-client-protocol = { version = "0.10.4", features = ["unstable_session_model", "unstable_session_resume"] }

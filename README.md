@@ -33,6 +33,17 @@ If you use `codex`, `claude`, or `pi`, you need a working `npx` environment avai
 
 ## Installation
 
+Global install from npm:
+
+```bash
+npm install -g @mythcode/cli
+mythcode --help
+```
+
+The npm package is published as `@mythcode/cli`, but it still exposes the `mythcode` command. The published package is a `cargo-dist` installer, so it installs the correct native Rust binary for your platform instead of wrapping the app in JavaScript.
+
+Build locally from source:
+
 ```bash
 cargo build --release
 ```
@@ -44,6 +55,36 @@ If you want it globally available:
 ```bash
 cargo install --path .
 ```
+
+## GitHub Release Flow
+
+The release workflow lives at [`.github/workflows/release.yml`](./.github/workflows/release.yml). It uses `cargo-dist` to:
+
+- build native release artifacts for Linux, macOS Intel, macOS Apple Silicon, and Windows
+- run when a GitHub Release is created for a version tag like `v0.1.0`
+- publish the npm package as public `@mythcode/cli`
+
+Required one-time setup:
+
+- create or reserve the npm scope/package you want to publish to, and make sure the token you use can publish `@mythcode/cli`
+- add `NPM_TOKEN` as a GitHub Actions secret in the repository
+- if this repo is moved or renamed, update the `repository` field in [`Cargo.toml`](./Cargo.toml) so `cargo-dist` points installers at the right GitHub Release URL
+- make sure the GitHub Release tag matches the version in [`Cargo.toml`](./Cargo.toml); the workflow fails fast if they differ
+
+Release steps:
+
+```bash
+# bump Cargo.toml version first
+cargo check
+git add Cargo.toml Cargo.lock README.md .github/workflows/release.yml
+git commit -m "release: v0.1.0"
+git push origin main
+git tag v0.1.0
+git push origin v0.1.0
+gh release create v0.1.0 --verify-tag --title "v0.1.0"
+```
+
+Once the workflow finishes, installing with `npm install -g @mythcode/cli` should put `mythcode` on your `PATH`.
 
 ## Quick Start
 
