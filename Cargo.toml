@@ -1,6 +1,6 @@
 [package]
 name = "mythcode"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A fast Rust CLI for talking to ACP-compatible coding agents from your terminal."
 readme = "README.md"
@@ -27,13 +27,17 @@ targets = [
 hosting = "github"
 publish-jobs = ["npm"]
 pr-run-mode = "plan"
+allow-dirty = ["ci"]
 
 [package.metadata.dist]
 npm-scope = "@mythcode"
 npm-package = "cli"
 
 [dependencies]
-agent-client-protocol = { version = "0.10.4", features = ["unstable_session_model", "unstable_session_resume"] }
+agent-client-protocol = { version = "0.10.4", features = [
+  "unstable_session_model",
+  "unstable_session_resume",
+] }
 anyhow = "1.0"
 async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
