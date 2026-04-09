@@ -1,0 +1,92 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Mythcode CLI palette */
+  --color-myth-blue: #89b4fa;
+  --color-myth-green: #a6e3a1;
+  --color-myth-red: #f38ba8;
+  --color-myth-yellow: #f9e2af;
+  --color-myth-magenta: #f5c2e7;
+  --color-myth-peach: #fab387;
+  --color-myth-mauve: #cba6f7;
+  --color-myth-lavender: #b4befe;
+  --color-myth-sky: #89dceb;
+  --color-myth-sapphire: #74c7ec;
+  --color-myth-overlay: #6c7086;
+  --color-myth-surface: #313244;
+  --color-myth-base: #1e1e2e;
+  --color-myth-mantle: #181825;
+  --color-myth-crust: #11111b;
+
+  --font-sans: ui-monospace, 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  --font-heading: var(--font-sans);
+}
+
+/* Catppuccin Mocha dark theme as default */
+:root {
+  --radius: 0.625rem;
+  --background: #1e1e2e;
+  --foreground: #cdd6f4;
+  --card: #181825;
+  --card-foreground: #cdd6f4;
+  --popover: #181825;
+  --popover-foreground: #cdd6f4;
+  --primary: #89b4fa;
+  --primary-foreground: #1e1e2e;
+  --secondary: #313244;
+  --secondary-foreground: #cdd6f4;
+  --muted: #313244;
+  --muted-foreground: #6c7086;
+  --accent: #313244;
+  --accent-foreground: #cdd6f4;
+  --destructive: #f38ba8;
+  --border: #313244;
+  --input: #313244;
+  --ring: #89b4fa;
+  --chart-1: #89b4fa;
+  --chart-2: #a6e3a1;
+  --chart-3: #fab387;
+  --chart-4: #cba6f7;
+  --chart-5: #f38ba8;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
