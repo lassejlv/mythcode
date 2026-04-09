@@ -342,7 +342,9 @@ fn resolve_cwd(project: Option<PathBuf>) -> Result<PathBuf> {
 }
 
 pub struct SignalState {
+    #[cfg(unix)]
     sigint: Option<tokio::signal::unix::Signal>,
+    #[cfg(unix)]
     sigterm: Option<tokio::signal::unix::Signal>,
 }
 
@@ -364,10 +366,7 @@ impl SignalState {
 
         #[cfg(not(unix))]
         {
-            Ok(Self {
-                sigint: None,
-                sigterm: None,
-            })
+            Ok(Self {})
         }
     }
 
