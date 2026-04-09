@@ -16,6 +16,10 @@ A blazing-fast Rust CLI for interacting with ACP-compatible coding agents direct
 npm install -g @mythcode/cli
 ```
 
+```bash
+bun install -g @mythcode/cli
+```
+
 Or download pre-built binaries from the [latest release](https://github.com/lassejlv/minicode/releases).
 
 **Requirements:** Rust stable + one agent provider (`opencode`, `codex`, `claude`, or `pi`).
