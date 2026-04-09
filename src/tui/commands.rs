@@ -85,23 +85,70 @@ impl Tui {
             }
             "/help" => {
                 self.history.push(String::new(), LineType::Status);
+
+                // Commands section
                 self.history.push(
                     format!("  {C_BOLD_CYAN}Commands{C_RESET}"),
                     LineType::Status,
                 );
+                self.history.push(String::new(), LineType::Status);
                 for (cmd, desc) in [
-                    ("/exit", "exit mythcode"),
+                    ("/help", "show this help"),
                     ("/clear", "clear the screen"),
                     ("/cwd", "show working directory"),
                     ("/new", "start a new session"),
                     ("/resume", "resume a previous session"),
                     ("/model", "select a model"),
+                    ("/exit", "exit mythcode"),
                 ] {
                     self.history.push(
-                        format!("  \x1b[0m{cmd:<9}{C_DIM}{desc}{C_RESET}"),
+                        format!("    \x1b[38;5;75m{cmd:<12}{C_RESET}{C_DIM}{desc}{C_RESET}"),
                         LineType::Status,
                     );
                 }
+
+                // Agent commands
+                let agent_commands = client.session_snapshot().commands().to_vec();
+                if !agent_commands.is_empty() {
+                    self.history.push(String::new(), LineType::Status);
+                    self.history.push(
+                        format!("  {C_BOLD_CYAN}Agent Commands{C_RESET}"),
+                        LineType::Status,
+                    );
+                    self.history.push(String::new(), LineType::Status);
+                    for cmd in &agent_commands {
+                        let name = format!("/{}", cmd.name);
+                        self.history.push(
+                            format!("    \x1b[38;5;75m{name:<12}{C_RESET}{C_DIM}{}{C_RESET}", cmd.description),
+                            LineType::Status,
+                        );
+                    }
+                }
+
+                // Keybindings section
+                self.history.push(String::new(), LineType::Status);
+                self.history.push(
+                    format!("  {C_BOLD_CYAN}Shortcuts{C_RESET}"),
+                    LineType::Status,
+                );
+                self.history.push(String::new(), LineType::Status);
+                for (key, desc) in [
+                    ("enter", "send message"),
+                    ("shift+enter", "new line"),
+                    ("tab", "autocomplete / queue message"),
+                    ("shift+tab", "cycle modes"),
+                    ("ctrl+o", "expand last tool output"),
+                    ("ctrl+c", "cancel / exit"),
+                    ("ctrl+d", "exit"),
+                    ("pgup/pgdn", "scroll history"),
+                    ("@file", "mention a file"),
+                ] {
+                    self.history.push(
+                        format!("    {C_DIM}{key:<14}{C_RESET}{C_DIM}{desc}{C_RESET}"),
+                        LineType::Status,
+                    );
+                }
+
                 self.history.push(String::new(), LineType::Status);
                 Ok(Some(CommandAction::Continue))
             }

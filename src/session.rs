@@ -18,6 +18,7 @@ pub struct SessionState {
 #[derive(Debug, Clone)]
 pub struct ModeOption {
     pub id: String,
+    #[allow(dead_code)]
     pub name: String,
 }
 

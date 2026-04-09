@@ -10,7 +10,7 @@ use crate::types::PermissionDecision;
 use super::highlight;
 use super::history::{format_status, LineType};
 use super::select::SelectKind;
-use super::{C_DIM, C_RESET, KeyAction, Tui};
+use super::{C_DIM, C_RESET, KeyAction, Suggestion, Tui};
 
 impl Tui {
     pub(super) async fn handle_key(
@@ -41,27 +41,28 @@ impl Tui {
                         match sel.kind {
                             SelectKind::Model => {
                                 let id = item.id.clone();
-                                let name = item.display.clone();
                                 client.set_model(&id).await?;
                                 self.current_model = Some(id);
-                                self.history.push(
-                                    format_status(&format!("model → {name}")),
-                                    LineType::Status,
-                                );
                             }
                             SelectKind::Resume => {
                                 let id = item.id.clone();
-                                let name = item.display.clone();
+
+                                // Clear history before resume — the agent will
+                                // replay the conversation as session/update
+                                // notifications which flow through the normal
+                                // event loop and populate the history.
+                                self.history.clear();
+                                self.last_activity = None;
+                                self.last_tool_outputs.clear();
+                                self.live_output_lines = 0;
+
                                 client.resume_session(&id).await?;
                                 self.current_mode = client.session_snapshot().current_mode().map(|s| s.to_string());
+                                self.current_model = client.session_snapshot()
+                                    .models()
+                                    .current_model_id
+                                    .clone();
                                 *file_index = crate::cli::build_file_index(client.session_snapshot().cwd());
-                                self.history.clear();
-                                self.history.push(String::new(), LineType::Status);
-                                self.history.push(
-                                    format_status(&format!("resumed: {name}")),
-                                    LineType::Status,
-                                );
-                                self.history.push(String::new(), LineType::Status);
                             }
                         }
                     }
@@ -138,7 +139,7 @@ impl Tui {
                         Some(i) => (i + 1) % self.suggestions.len(),
                     };
                     self.selected_suggestion = Some(idx);
-                    self.input.set_content(&self.suggestions[idx]);
+                    self.input.set_content(&self.suggestions[idx].value);
                     self.redraw()?;
                     return Ok(KeyAction::Continue);
                 }
@@ -150,7 +151,7 @@ impl Tui {
                             i - 1
                         };
                         self.selected_suggestion = Some(idx);
-                        self.input.set_content(&self.suggestions[idx]);
+                        self.input.set_content(&self.suggestions[idx].value);
                     }
                     self.redraw()?;
                     return Ok(KeyAction::Continue);
@@ -158,7 +159,7 @@ impl Tui {
                 KeyCode::Enter => {
                     // Accept the current suggestion into input, don't send
                     if let Some(idx) = self.selected_suggestion {
-                        self.input.set_content(&self.suggestions[idx]);
+                        self.input.set_content(&self.suggestions[idx].value);
                     }
                     self.suggestions.clear();
                     self.selected_suggestion = None;
@@ -181,7 +182,7 @@ impl Tui {
 
         match key.code {
             KeyCode::BackTab => {
-                // Shift+Tab: cycle through modes
+                // Shift+Tab: cycle through modes (shown in input box title)
                 let session = client.session_snapshot();
                 let modes = session.available_modes();
                 if modes.len() > 1 {
@@ -189,12 +190,7 @@ impl Tui {
                     let current_idx = modes.iter().position(|m| m.id == current).unwrap_or(0);
                     let next_idx = (current_idx + 1) % modes.len();
                     let next_id = modes[next_idx].id.clone();
-                    let next_name = modes[next_idx].name.clone();
                     client.set_mode(&next_id).await?;
-                    self.history.push(
-                        format_status(&format!("mode → {next_name}")),
-                        LineType::Status,
-                    );
                 }
                 self.redraw()?;
                 return Ok(KeyAction::Continue);
@@ -287,7 +283,7 @@ impl Tui {
                 self.update_suggestions_with_client(file_index, client);
                 if !self.suggestions.is_empty() {
                     self.selected_suggestion = Some(0);
-                    self.input.set_content(&self.suggestions[0].clone());
+                    self.input.set_content(&self.suggestions[0].value.clone());
                 } else {
                     // Queue the current message and clear input for the next
                     let text = self.input.take_content();
@@ -318,16 +314,25 @@ impl Tui {
             // Merge local + ACP commands
             let mut commands = crate::cli::local_commands();
             commands.extend_from_slice(client.session_snapshot().commands());
-            let mut matches: Vec<(u8, u8, String)> = commands
+            let mut matches: Vec<(u8, u8, Suggestion)> = commands
                 .iter()
                 .filter_map(|cmd| {
                     crate::input::score_command(cmd, &query).map(|(src, rank, _)| {
-                        let display = if cmd.hint.is_some() {
+                        let value = if cmd.hint.is_some() {
                             format!("/{} ", cmd.name)
                         } else {
                             format!("/{}", cmd.name)
                         };
-                        (src, rank, display)
+                        let source = match cmd.source {
+                            crate::types::SlashCommandSource::Local => "local",
+                            crate::types::SlashCommandSource::Agent => "agent",
+                        };
+                        (src, rank, Suggestion {
+                            label: format!("/{}", cmd.name),
+                            value,
+                            description: cmd.description.clone(),
+                            source,
+                        })
                     })
                 })
                 .collect();
@@ -345,7 +350,12 @@ impl Tui {
                     result.push('@');
                     result.push_str(&path);
                     result.push(' ');
-                    result
+                    Suggestion {
+                        label: path.clone(),
+                        value: result,
+                        description: String::new(),
+                        source: "file",
+                    }
                 })
                 .collect();
         }

@@ -22,6 +22,11 @@ impl Tui {
         let h = self.term_height;
         let input_box_h = self.input_box_height();
 
+        // Reserve space for the model info line below the input box
+        let model_line_h: u16 = if self.current_model.is_some() { 1 } else { 0 };
+        // Total fixed bottom chrome: input box + model line
+        let bottom_chrome = input_box_h + model_line_h;
+
         execute!(stdout, cursor::Hide)?;
 
         // Calculate how many extra rows we need for partials/spinner
@@ -40,7 +45,7 @@ impl Tui {
         }
 
         // Max space for all content (history + extras)
-        let max_content = h.saturating_sub(MARGIN_TOP + input_box_h);
+        let max_content = h.saturating_sub(MARGIN_TOP + bottom_chrome);
 
         // History gets the space minus what partials need
         let max_history = max_content.saturating_sub(extra_lines);
@@ -50,7 +55,8 @@ impl Tui {
         // Non-sticky: input follows content with a 1-line gap
         let content_rows = history_rows + extra_lines;
         let gap = if content_rows > 0 { 1u16 } else { 0 };
-        let input_row = (MARGIN_TOP + content_rows + gap).min(h.saturating_sub(input_box_h));
+        // Clamp so that input_box + model_line always fit on screen
+        let input_row = (MARGIN_TOP + content_rows + gap).min(h.saturating_sub(bottom_chrome));
         let draw_area = input_row.saturating_sub(MARGIN_TOP);
 
         // Clear margin
@@ -122,6 +128,14 @@ impl Tui {
 
         // Permission options (rendered between history and input)
         if let Some(ref perm) = self.pending_permission {
+            // Green/red background colors for accept/reject
+            const BG_GREEN: &str = "\x1b[48;5;22m";  // dark green bg
+            const BG_RED: &str = "\x1b[48;5;52m";    // dark red bg
+            const FG_GREEN: &str = "\x1b[38;5;114m";
+            const FG_RED: &str = "\x1b[38;5;174m";
+            const FG_WHITE: &str = "\x1b[38;5;255m";
+            const BG_RESET: &str = "\x1b[49m";
+
             let hint = format!("{C_DIM}↑↓ select · enter confirm · esc cancel{C_RESET}");
             let perm_start = input_row.saturating_sub(perm.options.len() as u16 + 1);
             execute!(stdout, cursor::MoveTo(0, perm_start))?;
@@ -132,10 +146,17 @@ impl Tui {
                     break;
                 }
                 execute!(stdout, cursor::MoveTo(0, row))?;
+                let is_accept = opt.kind.is_accept();
                 if i == perm.selected {
-                    write!(stdout, "\x1b[2K  {C_CYAN}▸ {opt}{C_RESET}")?;
+                    let (bg, fg) = if is_accept {
+                        (BG_GREEN, FG_WHITE)
+                    } else {
+                        (BG_RED, FG_WHITE)
+                    };
+                    write!(stdout, "\x1b[2K  {bg}{fg} ▸ {opt} {BG_RESET}{C_RESET}")?;
                 } else {
-                    write!(stdout, "\x1b[2K    {C_DIM}{opt}{C_RESET}")?;
+                    let fg = if is_accept { FG_GREEN } else { FG_RED };
+                    write!(stdout, "\x1b[2K    {fg}{opt}{C_RESET}")?;
                 }
             }
         }
@@ -155,7 +176,6 @@ impl Tui {
         self.input.render(input_row, w, input_box_h, &title, is_active)?;
 
         // Model info line below input box
-        let model_line_h: u16 = if self.current_model.is_some() { 1 } else { 0 };
         let model_row = input_row + input_box_h;
         if let Some(ref model) = self.current_model {
             if model_row < h {
@@ -171,36 +191,110 @@ impl Tui {
             }
         }
 
-        // Suggestions: render below if room, otherwise above the input box
+        // Suggestions: floating palette above the input box
         let suggestion_count = self.suggestions.len().min(8) as u16;
-        let below_start = input_row + input_box_h + model_line_h;
+        // menu = top border + items + bottom border/hint
+        let suggestion_menu_height = if suggestion_count > 0 { suggestion_count + 2 } else { 0 };
+        let below_start = input_row + bottom_chrome;
         let room_below = h.saturating_sub(below_start);
-        let render_above = suggestion_count > 0 && room_below < suggestion_count;
+        let render_above = suggestion_count > 0 && room_below < suggestion_menu_height;
 
         if !self.suggestions.is_empty() {
             let mut stdout = io::stdout();
+            let menu_height = suggestion_menu_height;
             let base_row = if render_above {
-                // Render above the input box
-                input_row.saturating_sub(suggestion_count)
+                input_row.saturating_sub(menu_height)
             } else {
                 below_start
             };
 
+            const BG_SEL: &str = "\x1b[48;5;237m"; // subtle selection bg
+            const BG_RESET: &str = "\x1b[49m";
+
+            // Find max label width for alignment
+            let max_label = self.suggestions.iter().take(8).map(|s| s.label.len()).max().unwrap_or(0);
+            // Find max description width to size the box
+            let max_desc = self.suggestions.iter().take(8).map(|s| s.description.len()).max().unwrap_or(0);
+            let inner_width = (max_label + 2 + max_desc + 4).max(20); // 4 for "  ▸ " prefix padding
+            let box_width = inner_width + 6; // borders + padding
+            let box_width = box_width.min(w.saturating_sub(2) as usize);
+
+            // Top border with header
+            let top_row = base_row;
+            if top_row < h {
+                execute!(stdout, cursor::MoveTo(1, top_row))?;
+                let is_command = self.suggestions.first().map_or(false, |s| s.label.starts_with('/'));
+                let header_label = if is_command { " Commands " } else { " Files " };
+                let border_rest = box_width.saturating_sub(header_label.len() + 1); // 1 for ╭
+                write!(
+                    stdout,
+                    "\x1b[2K{C_DARK}╭{C_RESET}{C_DIM}{header_label}{C_RESET}{C_DARK}{}{C_RESET}",
+                    "─".repeat(border_rest)
+                )?;
+            }
+
+            // Max space available for description text
+            // Layout: │ [▸/ ] label  desc [pad] │
+            //          1  3   label  2          1
+            let desc_budget = box_width.saturating_sub(4 + max_label + 2 + 2); // prefix + label + gap + borders
+
+            // Items
             for (i, suggestion) in self.suggestions.iter().enumerate().take(8) {
-                let row = base_row + i as u16;
+                let row = top_row + 1 + i as u16;
                 if row >= h {
                     break;
                 }
-                execute!(stdout, cursor::MoveTo(0, row))?;
-                if self.selected_suggestion == Some(i) {
-                    write!(stdout, "\x1b[2K  {C_CYAN}▸ {suggestion}{C_RESET}")?;
+                execute!(stdout, cursor::MoveTo(1, row))?;
+                let padded_label = format!("{:<width$}", suggestion.label, width = max_label);
+
+                // Truncate description to fit in the box
+                let desc = if suggestion.description.len() > desc_budget {
+                    let mut truncated: String = suggestion.description.chars().take(desc_budget.saturating_sub(1)).collect();
+                    truncated.push('…');
+                    truncated
                 } else {
-                    write!(stdout, "\x1b[2K    {C_DIM}{suggestion}{C_RESET}")?;
+                    suggestion.description.clone()
+                };
+
+                // Visible content width (without ANSI codes)
+                let visible_len = if desc.is_empty() {
+                    4 + padded_label.len()
+                } else {
+                    4 + padded_label.len() + 2 + desc.len()
+                };
+                let pad = box_width.saturating_sub(visible_len + 2); // 2 for │ borders
+
+                if self.selected_suggestion == Some(i) {
+                    write!(stdout, "\x1b[2K{C_DARK}│{C_RESET}{BG_SEL} {C_CYAN}▸ {padded_label}{C_RESET}{BG_SEL}")?;
+                    if !desc.is_empty() {
+                        write!(stdout, "  {C_DIM}{desc}{C_RESET}{BG_SEL}")?;
+                    }
+                    write!(stdout, "{}{BG_RESET}{C_DARK}│{C_RESET}", " ".repeat(pad))?;
+                } else {
+                    write!(stdout, "\x1b[2K{C_DARK}│{C_RESET}   {C_DARK}{padded_label}{C_RESET}")?;
+                    if !desc.is_empty() {
+                        write!(stdout, "  {C_DIM}{desc}{C_RESET}")?;
+                    }
+                    write!(stdout, "{}{C_DARK}│{C_RESET}", " ".repeat(pad + 1))?; // +1 for ▸ vs space
                 }
             }
-            // Clear remaining rows below input if rendering below
+
+            // Bottom border with hint
+            let bottom_row = top_row + 1 + suggestion_count;
+            if bottom_row < h {
+                execute!(stdout, cursor::MoveTo(1, bottom_row))?;
+                let hint = " tab/↑↓ navigate · enter select · esc close ";
+                let border_rest = box_width.saturating_sub(hint.len() + 1);
+                write!(
+                    stdout,
+                    "\x1b[2K{C_DARK}╰{}{C_RESET}{C_DARK}{hint}{C_RESET}",
+                    "─".repeat(border_rest)
+                )?;
+            }
+
+            // Clear remaining rows
             if !render_above {
-                let clear_from = base_row + suggestion_count;
+                let clear_from = base_row + menu_height;
                 for row in clear_from..h {
                     execute!(stdout, cursor::MoveTo(0, row))?;
                     write!(stdout, "\x1b[2K")?;
@@ -208,7 +302,7 @@ impl Tui {
             }
             stdout.flush()?;
         } else if self.select_mode.is_none() {
-            // Clear area below input
+            // Clear area below bottom chrome
             let mut stdout = io::stdout();
             for row in below_start..h {
                 execute!(stdout, cursor::MoveTo(0, row))?;
@@ -222,7 +316,7 @@ impl Tui {
             let mut stdout = io::stdout();
             let items_shown = sel.filtered.len().min(10) as u16;
             let sel_total = items_shown + 1; // items + title row
-            let sel_below_start = input_row + input_box_h;
+            let sel_below_start = input_row + bottom_chrome;
             let room_below = h.saturating_sub(sel_below_start);
             let sel_start = if room_below >= sel_total {
                 sel_below_start

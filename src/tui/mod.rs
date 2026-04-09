@@ -33,6 +33,20 @@ use markdown::MarkdownParser;
 use permission::PendingPermission;
 use select::SelectMode;
 
+/// A suggestion entry for the autocomplete menu.
+#[derive(Clone)]
+pub struct Suggestion {
+    /// The value inserted into the input when accepted (e.g. "/help")
+    pub value: String,
+    /// Display label shown in the menu (e.g. "/help")
+    pub label: String,
+    /// Optional description shown alongside
+    pub description: String,
+    /// Source tag (e.g. "local", "agent", "file")
+    #[allow(dead_code)]
+    pub source: &'static str,
+}
+
 const INPUT_BOX_MIN_HEIGHT: u16 = 3;
 const MARGIN_TOP: u16 = 1;
 
@@ -64,7 +78,7 @@ pub struct Tui {
     tool_active: bool,
     partial_line: Option<String>,
     thinking_partial: Option<String>,
-    suggestions: Vec<String>,
+    suggestions: Vec<Suggestion>,
     selected_suggestion: Option<usize>,
     printed_text: bool,
     project_name: String,

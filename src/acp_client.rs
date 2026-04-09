@@ -480,6 +480,11 @@ impl acp::Client for ClientHandler {
 
     async fn session_notification(&self, args: acp::SessionNotification) -> acp::Result<()> {
         match args.update {
+            acp::SessionUpdate::UserMessageChunk(chunk) => {
+                if let Some(text) = content_text(&chunk.content) {
+                    let _ = self.event_tx.send(AppEvent::UserMessage(text));
+                }
+            }
             acp::SessionUpdate::AgentMessageChunk(chunk) => {
                 if let Some(text) = content_text(&chunk.content) {
                     let _ = self.event_tx.send(AppEvent::AssistantText(text));

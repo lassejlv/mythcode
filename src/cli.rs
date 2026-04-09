@@ -61,7 +61,11 @@ pub async fn run() -> Result<()> {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let connected = AcpClient::connect(&config).await?;
+            let connected = if input::is_interactive_terminal() && config.prompt.is_none() {
+                connect_with_loading(&config).await?
+            } else {
+                AcpClient::connect(&config).await?
+            };
             let mut client = connected.client;
             let mut events = connected.events;
             let mut signals = SignalState::new()?;
@@ -256,61 +260,298 @@ pub fn build_file_index(cwd: &Path) -> FileIndex {
     FileIndex::build(cwd).unwrap_or_default()
 }
 
+async fn connect_with_loading(config: &AppConfig) -> Result<crate::acp_client::ConnectedClient> {
+    use crossterm::{cursor, execute, terminal};
+    use std::time::Instant;
+
+    const RESET: &str = "\x1b[0m";
+    const BOLD_CYAN: &str = "\x1b[1;38;5;75m";
+    const DARK: &str = "\x1b[38;5;240m";
+    const SPINNER_COLOR: &str = "\x1b[38;5;75m";
+
+    let provider_label = match &config.provider {
+        AcpProvider::OpenCode => "OpenCode",
+        AcpProvider::Codex => "Codex",
+        AcpProvider::Claude => "Claude Code",
+        AcpProvider::Pi => "Pi",
+    };
+
+    let connect_messages: &[&str] = &[
+        "Connecting…",
+        "Starting agent…",
+        "Initializing…",
+        "Establishing session…",
+        "Almost there…",
+    ];
+
+    let mut stdout = io::stdout();
+    let (_w, h) = terminal::size().unwrap_or((80, 24));
+
+    terminal::enable_raw_mode()?;
+    execute!(stdout, cursor::Hide)?;
+
+    let start = Instant::now();
+    let mut tick: usize = 0;
+
+    // Spawn the actual connection
+    let connect_future = AcpClient::connect(config);
+    tokio::pin!(connect_future);
+
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(crate::spinner::INTERVAL_MS));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    let result = loop {
+        tokio::select! {
+            result = &mut connect_future => {
+                break result;
+            }
+            _ = interval.tick() => {
+                tick += 1;
+                let elapsed = start.elapsed().as_secs();
+                let msg_idx = (elapsed / 5) as usize % connect_messages.len();
+                let status = connect_messages[msg_idx];
+                let frame = crate::spinner::frame(tick);
+                let shimmer = crate::spinner::shimmer(tick, status);
+                let timer = crate::spinner::format_elapsed(elapsed);
+
+                let center_y = h / 2;
+
+                write!(stdout, "\x1b[2J\x1b[H")?;
+
+                // Branding
+                execute!(stdout, cursor::MoveTo(0, center_y.saturating_sub(2)))?;
+                write!(stdout, "  {BOLD_CYAN}mythcode{RESET}\r\n")?;
+
+                // Provider
+                execute!(stdout, cursor::MoveTo(0, center_y.saturating_sub(1)))?;
+                write!(stdout, "  {DARK}{provider_label}{RESET}\r\n")?;
+
+                // Blank line
+                execute!(stdout, cursor::MoveTo(0, center_y))?;
+                write!(stdout, "\r\n")?;
+
+                // Spinner + status
+                execute!(stdout, cursor::MoveTo(0, center_y + 1))?;
+                write!(stdout, "  {SPINNER_COLOR}{frame}{RESET}  {shimmer}  {DARK}{timer}{RESET}\r\n")?;
+
+                stdout.flush()?;
+            }
+        }
+    };
+
+    // Clean up
+    terminal::disable_raw_mode()?;
+    execute!(stdout, cursor::Show)?;
+    write!(stdout, "\x1b[2J\x1b[H")?;
+    stdout.flush()?;
+
+    result
+}
+
 fn pick_provider() -> Result<AcpProvider> {
     use crossterm::event::{self, Event, KeyCode};
     use crossterm::{cursor, execute, terminal};
 
+    // Colors
+    const RESET: &str = "\x1b[0m";
+    const BOLD: &str = "\x1b[1m";
+    const DIM: &str = "\x1b[38;5;240m";
+    const GRAY: &str = "\x1b[38;5;245m";
+    const CYAN: &str = "\x1b[38;5;75m";
+    const BOLD_CYAN: &str = "\x1b[1;38;5;75m";
+    const GREEN: &str = "\x1b[38;5;114m";
+    const MAGENTA: &str = "\x1b[38;5;176m";
+    #[allow(dead_code)]
+    const YELLOW: &str = "\x1b[38;5;179m";
+    const ORANGE: &str = "\x1b[38;5;209m";
+
+    struct ProviderEntry {
+        provider: AcpProvider,
+        name: &'static str,
+        package: &'static str,
+        description: &'static str,
+        color: &'static str,
+        icon: &'static str,
+    }
+
     let providers = [
-        (AcpProvider::OpenCode, "opencode", "OpenCode ACP server"),
-        (AcpProvider::Codex, "codex", "Codex ACP (Zed)"),
-        (AcpProvider::Claude, "claude", "Claude Code ACP"),
-        (AcpProvider::Pi, "pi", "Pi ACP"),
+        ProviderEntry {
+            provider: AcpProvider::Claude,
+            name: "Claude Code",
+            package: "@agentclientprotocol/claude-agent-acp",
+            description: "Anthropic's Claude with full coding capabilities",
+            color: ORANGE,
+            icon: "◆",
+        },
+        ProviderEntry {
+            provider: AcpProvider::OpenCode,
+            name: "OpenCode",
+            package: "opencode acp",
+            description: "Open-source multi-provider coding agent",
+            color: GREEN,
+            icon: "◇",
+        },
+        ProviderEntry {
+            provider: AcpProvider::Codex,
+            name: "Codex",
+            package: "@zed-industries/codex-acp",
+            description: "OpenAI Codex agent by Zed",
+            color: CYAN,
+            icon: "◈",
+        },
+        ProviderEntry {
+            provider: AcpProvider::Pi,
+            name: "Pi",
+            package: "pi-acp",
+            description: "Pi coding assistant",
+            color: MAGENTA,
+            icon: "●",
+        },
     ];
 
     let mut selected = 0usize;
     let mut stdout = io::stdout();
+    let (_term_w, term_h) = terminal::size().unwrap_or((80, 24));
 
     terminal::enable_raw_mode()?;
 
     loop {
-        // Draw menu
-        execute!(stdout, cursor::MoveTo(0, 0))?;
         write!(stdout, "\x1b[2J\x1b[H")?; // clear screen
-        writeln!(stdout, "\r")?;
-        writeln!(stdout, "  \x1b[1;38;5;75mmythcode\x1b[0m\r")?;
-        writeln!(stdout, "  \x1b[38;5;245mSelect an ACP provider:\x1b[0m\r")?;
-        writeln!(stdout, "\r")?;
 
-        for (i, (_, name, desc)) in providers.iter().enumerate() {
-            if i == selected {
-                writeln!(stdout, "  \x1b[38;5;75m▸ {name}\x1b[0m  \x1b[38;5;245m{desc}\x1b[0m\r")?;
+        // Center content vertically
+        let content_height = 4 + providers.len() * 3 + 3; // header + items + footer
+        let start_y = if (term_h as usize) > content_height + 4 {
+            ((term_h as usize - content_height) / 2) as u16
+        } else {
+            1
+        };
+
+        let mut row = start_y;
+
+        // Logo / branding
+        execute!(stdout, cursor::MoveTo(0, row))?;
+        writeln!(stdout, "\r")?;
+        row += 1;
+        execute!(stdout, cursor::MoveTo(0, row))?;
+        writeln!(stdout, "  {BOLD_CYAN}mythcode{RESET}\r")?;
+        row += 1;
+        execute!(stdout, cursor::MoveTo(0, row))?;
+        writeln!(stdout, "  {GRAY}Select a coding agent to connect to{RESET}\r")?;
+        row += 1;
+        execute!(stdout, cursor::MoveTo(0, row))?;
+        writeln!(stdout, "\r")?;
+        row += 1;
+
+        // Provider cards
+        for (i, entry) in providers.iter().enumerate() {
+            let is_selected = i == selected;
+
+            execute!(stdout, cursor::MoveTo(0, row))?;
+            if is_selected {
+                writeln!(
+                    stdout,
+                    "  {CYAN}▸{RESET} {color}{icon}{RESET}  {BOLD}{name}{RESET}",
+                    color = entry.color,
+                    icon = entry.icon,
+                    name = entry.name,
+                )?;
             } else {
-                writeln!(stdout, "    \x1b[38;5;240m{name}  {desc}\x1b[0m\r")?;
+                writeln!(
+                    stdout,
+                    "    {DIM}{icon}{RESET}  {DIM}{name}{RESET}",
+                    icon = entry.icon,
+                    name = entry.name,
+                )?;
             }
+            write!(stdout, "\r")?;
+            row += 1;
+
+            execute!(stdout, cursor::MoveTo(0, row))?;
+            if is_selected {
+                writeln!(
+                    stdout,
+                    "       {GRAY}{desc}{RESET}\r",
+                    desc = entry.description,
+                )?;
+            } else {
+                writeln!(stdout, "       {DIM}{desc}{RESET}\r", desc = entry.description)?;
+            }
+            row += 1;
+
+            // Show package name for selected item
+            execute!(stdout, cursor::MoveTo(0, row))?;
+            if is_selected {
+                writeln!(
+                    stdout,
+                    "       {DIM}{pkg}{RESET}\r",
+                    pkg = entry.package,
+                )?;
+            } else {
+                writeln!(stdout, "\r")?;
+            }
+            row += 1;
         }
 
+        // Footer
+        execute!(stdout, cursor::MoveTo(0, row))?;
         writeln!(stdout, "\r")?;
-        writeln!(stdout, "  \x1b[38;5;240m↑↓ select · enter confirm · q quit\x1b[0m\r")?;
+        row += 1;
+        execute!(stdout, cursor::MoveTo(0, row))?;
+        writeln!(
+            stdout,
+            "  {DIM}↑↓ navigate  enter select  q quit{RESET}\r"
+        )?;
+        row += 1;
+        execute!(stdout, cursor::MoveTo(0, row))?;
+        writeln!(
+            stdout,
+            "  {DIM}or use {RESET}{DIM}--provider <name>{RESET}{DIM} to skip this menu{RESET}\r"
+        )?;
+
         stdout.flush()?;
 
         // Read key
         if let Event::Key(key) = event::read()? {
             match key.code {
-                KeyCode::Up => {
+                KeyCode::Up | KeyCode::Char('k') => {
                     if selected > 0 {
                         selected -= 1;
                     }
                 }
-                KeyCode::Down => {
+                KeyCode::Down | KeyCode::Char('j') => {
                     if selected + 1 < providers.len() {
                         selected += 1;
                     }
                 }
-                KeyCode::Enter => {
+                KeyCode::Enter | KeyCode::Char(' ') => {
                     terminal::disable_raw_mode()?;
-                    write!(stdout, "\x1b[2J\x1b[H")?; // clear screen
+                    write!(stdout, "\x1b[2J\x1b[H")?;
                     stdout.flush()?;
-                    return Ok(providers[selected].0.clone());
+                    return Ok(providers[selected].provider.clone());
+                }
+                KeyCode::Char('1') => {
+                    terminal::disable_raw_mode()?;
+                    write!(stdout, "\x1b[2J\x1b[H")?;
+                    stdout.flush()?;
+                    return Ok(providers[0].provider.clone());
+                }
+                KeyCode::Char('2') => {
+                    terminal::disable_raw_mode()?;
+                    write!(stdout, "\x1b[2J\x1b[H")?;
+                    stdout.flush()?;
+                    return Ok(providers[1].provider.clone());
+                }
+                KeyCode::Char('3') => {
+                    terminal::disable_raw_mode()?;
+                    write!(stdout, "\x1b[2J\x1b[H")?;
+                    stdout.flush()?;
+                    return Ok(providers[2].provider.clone());
+                }
+                KeyCode::Char('4') if providers.len() >= 4 => {
+                    terminal::disable_raw_mode()?;
+                    write!(stdout, "\x1b[2J\x1b[H")?;
+                    stdout.flush()?;
+                    return Ok(providers[3].provider.clone());
                 }
                 KeyCode::Char('q') | KeyCode::Esc => {
                     terminal::disable_raw_mode()?;

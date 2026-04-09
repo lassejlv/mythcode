@@ -6,7 +6,7 @@ use crate::types::{AppEvent, PermissionDecision};
 
 use super::history::{
     format_activity, format_diff, format_plan, format_status, format_tool_output,
-    format_warning, LineType,
+    format_user_message, format_warning, LineType,
 };
 use super::markdown::wrap_ansi;
 use super::permission::PendingPermission;
@@ -17,6 +17,16 @@ impl Tui {
 
     pub(super) fn handle_app_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::UserMessage(text) => {
+                // User messages replayed from session history
+                self.stop_spinner();
+                self.flush_assistant();
+                self.flush_thinking();
+                self.live_output_lines = 0;
+                self.last_activity = None;
+                let lines = format_user_message(text.trim());
+                self.history.push_lines(lines, LineType::UserMessage);
+            }
             AppEvent::AssistantText(text) => {
                 self.stop_spinner();
                 self.tool_active = false;
@@ -46,6 +56,10 @@ impl Tui {
                 self.flush_assistant();
                 self.flush_thinking();
                 self.live_output_lines = 0; // new tool, reset live output
+                // Add spacing before tool activity (unless it's the first one)
+                if self.last_activity.is_some() {
+                    self.history.push(String::new(), LineType::Separator);
+                }
                 self.history.push(format_activity(&activity), LineType::Activity);
                 self.last_activity = Some(activity);
                 self.tool_active = true;
@@ -55,17 +69,10 @@ impl Tui {
                 self.stop_spinner();
                 self.flush_assistant();
                 self.flush_thinking();
-                self.current_mode = Some(mode.clone());
-                self.history.push(
-                    format_activity(&format!("mode → {mode}")),
-                    LineType::Activity,
-                );
+                self.current_mode = Some(mode);
             }
-            AppEvent::SessionTitle(title) => {
-                self.history.push(
-                    format_activity(&format!("session: {title}")),
-                    LineType::Activity,
-                );
+            AppEvent::SessionTitle(_title) => {
+                // Title shown in input box border, no need to log
             }
             AppEvent::ToolDiff(diff) => {
                 self.stop_spinner();
@@ -73,7 +80,6 @@ impl Tui {
                 self.flush_thinking();
                 let lines = format_diff(&diff);
                 self.history.push_lines(lines, LineType::Diff);
-                self.history.push(String::new(), LineType::Diff);
             }
             AppEvent::ToolOutput(output) => {
                 // Replace previous live output lines

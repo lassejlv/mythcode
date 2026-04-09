@@ -36,6 +36,7 @@ impl std::fmt::Display for AcpProvider {
 pub enum AppEvent {
     AssistantText(String),
     ThinkingText(String),
+    UserMessage(String),
     Activity(String),
     ModeChanged(String),
     SessionTitle(String),
@@ -44,8 +45,8 @@ pub enum AppEvent {
     PlanUpdate(PlanView),
     PermissionRequest(PermissionRequestView),
     Warning(String),
-    DebugProtocol(String),
-    ProcessStderr(String),
+    DebugProtocol(#[allow(dead_code)] String),
+    ProcessStderr(#[allow(dead_code)] String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
