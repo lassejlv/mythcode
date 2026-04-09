@@ -273,7 +273,7 @@ jobs:
         run: |
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.TAP_TOKEN }}" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             https://api.github.com/repos/lassejlv/homebrew-mythcode/dispatches \
             -d '{"event_type":"update-formula","client_payload":{"version":"${{ needs.plan.outputs.tag }}"}}'
         continue-on-error: true
