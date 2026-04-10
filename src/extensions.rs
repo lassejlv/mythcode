@@ -211,7 +211,7 @@ async fn spawn_host(
     let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
 
     // Stdin writer task
-    tokio::spawn(async move {
+    tokio::task::spawn_local(async move {
         let mut stdin = stdin;
         while let Some(line) = stdin_rx.recv().await {
             if stdin.write_all(line.as_bytes()).await.is_err() {
@@ -235,7 +235,7 @@ async fn spawn_host(
     let pending_clone = pending.clone();
     let commands_clone = commands.clone();
     let event_tx_clone = event_tx.clone();
-    tokio::spawn(async move {
+    tokio::task::spawn_local(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let Ok(msg) = serde_json::from_str::<JsonRpcMessage>(&line) else {
@@ -309,7 +309,7 @@ async fn spawn_host(
     });
 
     // Stderr reader — forward as warnings
-    tokio::spawn(async move {
+    tokio::task::spawn_local(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let _ = event_tx.send(AppEvent::Warning(format!("ext: {line}")));
