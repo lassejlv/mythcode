@@ -5,11 +5,8 @@ use similar::{ChangeTag, TextDiff};
 use super::highlight::{self, Highlighter};
 use crate::types::{DiffPreview, PlanEntryStatus, PlanView};
 
-// Claude Code-inspired palette
 const C_RESET: &str = "\x1b[0m";
-const C_ACCENT: &str = "\x1b[38;5;75m";    // blue accent
-#[allow(dead_code)]
-const C_DIM_CYAN: &str = "\x1b[38;5;67m";
+const C_ACCENT: &str = "\x1b[38;5;75m";
 const C_GREEN: &str = "\x1b[38;5;114m";
 const C_RED: &str = "\x1b[38;5;174m";
 const C_YELLOW: &str = "\x1b[38;5;179m";
@@ -17,7 +14,9 @@ const C_MAGENTA: &str = "\x1b[38;5;176m";
 const C_GRAY: &str = "\x1b[38;5;245m";
 const C_DARK: &str = "\x1b[38;5;240m";
 const C_LINE_NO: &str = "\x1b[38;5;240m";
+#[allow(dead_code)]
 const C_WHITE: &str = "\x1b[38;5;252m";
+const C_DOT: &str = "\x1b[38;5;179m"; // yellow dot like Claude Code
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineType {
@@ -54,7 +53,6 @@ impl History {
 
     pub fn push(&mut self, content: String, line_type: LineType) {
         self.lines.push(RenderedLine { content, line_type });
-        // Auto-scroll to bottom when new content arrives
         self.scroll_offset = 0;
     }
 
@@ -75,7 +73,6 @@ impl History {
     }
 
     pub fn scroll_up(&mut self, amount: usize) {
-        // Don't scroll past the beginning — keep at least a few lines visible
         let max = self.lines.len().saturating_sub(3);
         self.scroll_offset = (self.scroll_offset + amount).min(max);
     }
@@ -95,7 +92,6 @@ impl History {
     }
 }
 
-/// Format user message echo (shown before assistant response)
 pub fn format_user_message(message: &str) -> Vec<String> {
     vec![
         String::new(),
@@ -103,7 +99,6 @@ pub fn format_user_message(message: &str) -> Vec<String> {
     ]
 }
 
-/// Turn separator — subtle line between conversation turns
 pub fn format_turn_separator(elapsed: &str) -> Vec<String> {
     if elapsed.is_empty() {
         vec![String::new()]
@@ -115,32 +110,26 @@ pub fn format_turn_separator(elapsed: &str) -> Vec<String> {
     }
 }
 
-/// Activity line: tool calls, mode changes, etc.
 pub fn format_activity(activity: &str) -> String {
-    // Shorten file paths and truncate long commands
     let short = shorten_activity(activity);
-    let truncated = if short.chars().count() > 60 {
-        let s: String = short.chars().take(57).collect();
+    let truncated = if short.chars().count() > 70 {
+        let s: String = short.chars().take(67).collect();
         format!("{s}…")
     } else {
         short
     };
-    format!("  {C_DARK}  {truncated}{C_RESET}")
+    format!("  {C_DOT}●{C_RESET} {C_DARK}{truncated}{C_RESET}")
 }
 
-/// Warning line
 pub fn format_warning(message: &str) -> String {
-    format!("  {C_YELLOW}  {message}{C_RESET}")
+    format!("  {C_YELLOW}⚠ {message}{C_RESET}")
 }
 
-/// Status/info line
 pub fn format_status(message: &str) -> String {
     format!("  {C_GRAY}{message}{C_RESET}")
 }
 
-/// Shorten paths in activity strings — "Read /Users/foo/project/src/main.rs" → "Read main.rs"
 fn shorten_activity(activity: &str) -> String {
-    // Split into words, shorten anything that looks like a file path
     activity
         .split_whitespace()
         .map(|word| {
@@ -154,7 +143,6 @@ fn shorten_activity(activity: &str) -> String {
         .join(" ")
 }
 
-/// Shorten a path to just filename, or dir/file for disambiguation
 fn shorten_path(path: &str) -> String {
     let p = Path::new(path);
     if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
@@ -164,25 +152,19 @@ fn shorten_path(path: &str) -> String {
     }
 }
 
-/// Max lines to show for tool output preview
 const TOOL_OUTPUT_MAX_LINES: usize = 4;
 
-/// Format tool output with truncation and syntax highlighting
 pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec<String> {
     let mut lines = Vec::new();
 
-    let icon = tool_icon(title);
-
-    // Shorten the title (paths get shortened, long strings truncated)
     let short_title = shorten_activity(title);
-    let display_title = if short_title.chars().count() > 60 {
-        let s: String = short_title.chars().take(57).collect();
+    let display_title = if short_title.chars().count() > 70 {
+        let s: String = short_title.chars().take(67).collect();
         format!("{s}…")
     } else {
         short_title
     };
 
-    // Line count tag
     let lines_tag = if total_lines > 0 {
         format!("  {C_DARK}{total_lines} lines{C_RESET}")
     } else {
@@ -190,7 +172,7 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
     };
 
     lines.push(format!(
-        "  {C_ACCENT}{icon}{C_RESET} {C_WHITE}{display_title}{C_RESET}{lines_tag}"
+        "  {C_DOT}●{C_RESET} \x1b[1m{display_title}\x1b[0m{lines_tag}"
     ));
 
     let preview_lines: Vec<&str> = content.lines().take(TOOL_OUTPUT_MAX_LINES).collect();
@@ -204,20 +186,23 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
             .unwrap_or("");
         let mut hl = Highlighter::new(ext);
 
+        let is_last = |i: usize| -> bool { i == shown - 1 && total_lines <= shown };
+
         for (i, line) in preview_lines.iter().enumerate() {
             let line_no = format!("{:>3}", i + 1);
             let colored = hl
                 .as_mut()
                 .and_then(|h| h.highlight_line(line))
                 .unwrap_or_else(|| format!("{C_DARK}{line}{C_RESET}"));
+            let connector = if is_last(i) { "└" } else { "├" };
             lines.push(format!(
-                "     {C_LINE_NO}{line_no}{C_RESET}  {colored}"
+                "    {C_DARK}{connector}{C_RESET} {C_LINE_NO}{line_no}{C_RESET}  {colored}"
             ));
         }
         if total_lines > shown {
             let remaining = total_lines - shown;
             lines.push(format!(
-                "     {C_DARK}… {remaining} more lines{C_RESET}"
+                "    {C_DARK}└ … {remaining} more lines{C_RESET}"
             ));
         }
     }
@@ -225,7 +210,6 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
     lines
 }
 
-/// Format a plan/todo list
 pub fn format_plan(plan: &PlanView) -> Vec<String> {
     let mut lines = Vec::new();
     lines.push(String::new());
@@ -242,14 +226,12 @@ pub fn format_plan(plan: &PlanView) -> Vec<String> {
     lines
 }
 
-/// Format a diff — clean style with syntax highlighting and background colors
 pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
     let mut lines = Vec::new();
     let old_text = diff.old_text.as_deref().unwrap_or("");
     let text_diff = TextDiff::from_lines(old_text, &diff.new_text);
     let groups = text_diff.grouped_ops(3);
 
-    // Set up syntax highlighter based on file extension
     let ext = diff
         .path
         .extension()
@@ -257,7 +239,6 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
         .unwrap_or("");
     let mut hl = Highlighter::new(ext);
 
-    // Count insertions and deletions
     let mut insertions = 0usize;
     let mut deletions = 0usize;
     for group in &groups {
@@ -272,20 +253,15 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
         }
     }
 
-    // Determine if this is a new file (Write) or edit
     let is_new_file = old_text.is_empty() && insertions > 0;
-    let icon = if is_new_file { "+" } else { "◆" };
-    let icon_color = if is_new_file { C_GREEN } else { C_ACCENT };
     let verb = if is_new_file { "Write" } else { "Edit" };
 
-    // Short filename
     let filename = diff
         .path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or_else(|| diff.path.to_str().unwrap_or(""));
 
-    // Parent directory for context (e.g. "src/")
     let parent_hint = diff
         .path
         .parent()
@@ -294,33 +270,38 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
         .map(|s| format!("{s}/"))
         .unwrap_or_default();
 
-    // Stats
-    let stats = if deletions == 0 {
-        format!("{C_GREEN}+{insertions}{C_RESET}")
-    } else if insertions == 0 {
-        format!("{C_RED}-{deletions}{C_RESET}")
-    } else {
-        format!("{C_GREEN}+{insertions}{C_RESET} {C_RED}-{deletions}{C_RESET}")
-    };
-
-    // File header — integrated into top border
+    // Header: ● Edit src/main.rs
     lines.push(format!(
-        "  {icon_color}{icon}{C_RESET} {C_WHITE}{verb}{C_RESET} {C_DARK}{parent_hint}{C_RESET}{C_MAGENTA}{filename}{C_RESET}  {stats}"
+        "  {C_DOT}●{C_RESET} \x1b[1m{verb}\x1b[0m({C_DARK}{parent_hint}{C_RESET}{C_MAGENTA}{filename}{C_RESET})"
+    ));
+
+    // Stats line
+    let stats_text = if deletions == 0 {
+        format!("Added {insertions} lines")
+    } else if insertions == 0 {
+        format!("Removed {deletions} lines")
+    } else {
+        format!("Added {insertions} lines, removed {deletions} lines")
+    };
+    lines.push(format!(
+        "    {C_DARK}├{C_RESET} {C_DARK}{stats_text}{C_RESET}"
     ));
 
     if groups.is_empty() {
-        lines.push(format!("    {C_DARK}(no changes){C_RESET}"));
+        lines.push(format!("    {C_DARK}└ (no changes){C_RESET}"));
         return lines;
     }
 
-    // Background colors for diff lines
     const BG_RED: &str = "\x1b[48;2;60;20;25m";
     const BG_GREEN: &str = "\x1b[48;2;20;50;30m";
     const BG_RESET: &str = "\x1b[49m";
 
+    // Collect all diff lines first so we know which is last
+    let mut diff_lines: Vec<String> = Vec::new();
+
     for (group_idx, group) in groups.iter().enumerate() {
         if group_idx > 0 {
-            lines.push(format!("      {C_DARK}⋯{C_RESET}"));
+            diff_lines.push(format!("    {C_DARK}├{C_RESET}  {C_DARK}⋯{C_RESET}"));
         }
 
         for op in group {
@@ -336,7 +317,7 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                 let formatted = match change.tag() {
                     ChangeTag::Delete => {
                         format!(
-                            "    {BG_RED} {C_LINE_NO}{line_no}{C_RESET}{BG_RED} {C_RED}- {change_trimmed}{C_RESET}{BG_RESET}"
+                            "    {C_DARK}├{C_RESET}{BG_RED} {C_LINE_NO}{line_no}{C_RESET}{BG_RED} {C_RED}- {change_trimmed}{C_RESET}{BG_RESET}"
                         )
                     }
                     ChangeTag::Insert => {
@@ -345,7 +326,7 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                             .and_then(|h| h.highlight_line(change_trimmed))
                             .unwrap_or_else(|| format!("{C_GREEN}{change_trimmed}{C_RESET}"));
                         format!(
-                            "    {BG_GREEN} {C_LINE_NO}{line_no}{C_RESET}{BG_GREEN} {C_GREEN}+ {C_RESET}{BG_GREEN}{highlighted}{BG_RESET}"
+                            "    {C_DARK}├{C_RESET}{BG_GREEN} {C_LINE_NO}{line_no}{C_RESET}{BG_GREEN} {C_GREEN}+ {C_RESET}{BG_GREEN}{highlighted}{BG_RESET}"
                         )
                     }
                     ChangeTag::Equal => {
@@ -354,38 +335,22 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                             .and_then(|h| h.highlight_line(change_trimmed))
                             .unwrap_or_else(|| format!("{C_DARK}{change_trimmed}{C_RESET}"));
                         format!(
-                            "     {C_LINE_NO}{line_no}{C_RESET}   {highlighted}"
+                            "    {C_DARK}├{C_RESET} {C_LINE_NO}{line_no}{C_RESET}   {highlighted}"
                         )
                     }
                 };
-                lines.push(formatted);
+                diff_lines.push(formatted);
             }
         }
     }
 
-    lines
-}
-
-/// Map tool titles to icons
-fn tool_icon(title: &str) -> &'static str {
-    let lower = title.to_lowercase();
-    if lower.starts_with("read") {
-        "◇"
-    } else if lower.starts_with("edit") {
-        "◆"
-    } else if lower.starts_with("write") {
-        "+"
-    } else if lower.starts_with("bash") || lower.starts_with("run") || lower.starts_with("exec") {
-        "$"
-    } else if lower.starts_with("grep") || lower.starts_with("search") || lower.starts_with("glob") || lower.starts_with("find") {
-        "⌕"
-    } else if lower.starts_with("agent") || lower.starts_with("launch") || lower.starts_with("task") {
-        "→"
-    } else if lower.starts_with("web") {
-        "↗"
-    } else {
-        "▸"
+    // Replace last ├ with └
+    if let Some(last) = diff_lines.last_mut() {
+        *last = last.replacen('├', "└", 1);
     }
+
+    lines.extend(diff_lines);
+    lines
 }
 
 fn format_line_no(index: Option<usize>) -> String {
