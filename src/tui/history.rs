@@ -181,21 +181,21 @@ pub fn format_user_message(message: &str, image_numbers: &[u32]) -> Vec<String> 
             first_line.to_string()
         };
         vec![format!(
-            "  {}❯{R} \x1b[1m{preview}\x1b[0m  {}[{line_count} lines]{R}{image_suffix}",
+            "{}❯{R} \x1b[1m{preview}\x1b[0m  {}[{line_count} lines]{R}{image_suffix}",
             t.accent, t.dark
         )]
     } else if message.is_empty() && !image_numbers.is_empty() {
-        vec![format!("  {}❯{R}{image_suffix}", t.accent)]
+        vec![format!("{}❯{R}{image_suffix}", t.accent)]
     } else {
         let mut lines = Vec::new();
         for (i, line) in message.lines().enumerate() {
             if i == 0 {
                 lines.push(format!(
-                    "  {}❯{R} \x1b[1m{line}\x1b[0m{image_suffix}",
+                    "{}❯{R} \x1b[1m{line}\x1b[0m{image_suffix}",
                     t.accent
                 ));
             } else {
-                lines.push(format!("    \x1b[1m{line}\x1b[0m"));
+                lines.push(format!("  \x1b[1m{line}\x1b[0m"));
             }
         }
         lines
@@ -207,7 +207,7 @@ pub fn format_turn_separator(elapsed: &str) -> Vec<String> {
         vec![]
     } else {
         let t = theme::theme();
-        vec![format!("  {}· {elapsed}{R}", t.dark)]
+        vec![format!(" {}· {elapsed}{R}", t.dark)]
     }
 }
 
@@ -232,17 +232,17 @@ pub fn format_activity(activity: &str, status: Option<acp::ToolCallStatus>) -> S
     } else {
         short
     };
-    format!("  {dot}●{R} {}{truncated}{R}", t.dark)
+    format!(" {dot}●{R} {}{truncated}{R}", t.dark)
 }
 
 pub fn format_warning(message: &str) -> String {
     let t = theme::theme();
-    format!("  {}⚠ {message}{R}", t.yellow)
+    format!(" {}⚠ {message}{R}", t.yellow)
 }
 
 pub fn format_status(message: &str) -> String {
     let t = theme::theme();
-    format!("  {}{message}{R}", t.gray)
+    format!(" {}{message}{R}", t.gray)
 }
 
 fn shorten_activity(activity: &str) -> String {
@@ -268,7 +268,7 @@ fn shorten_path(path: &str) -> String {
     }
 }
 
-const TOOL_OUTPUT_MAX_LINES: usize = 3;
+const TOOL_OUTPUT_MAX_LINES: usize = 2;
 
 pub fn format_tool_output(
     title: &str,
@@ -295,11 +295,10 @@ pub fn format_tool_output(
     };
 
     lines.push(format!(
-        "  {}●{R} \x1b[1m{display_title}\x1b[0m{lines_tag}",
+        " {}●{R} \x1b[1m{display_title}\x1b[0m{lines_tag}",
         dot
     ));
 
-    // Drop the theme lock before syntax highlighting (it may take time)
     let dark = t.dark.clone();
     drop(t);
 
@@ -314,19 +313,16 @@ pub fn format_tool_output(
             .unwrap_or("");
         let mut hl = Highlighter::new(ext);
 
-        let is_last = |i: usize| -> bool { i == shown - 1 && total_lines <= shown };
-
-        for (i, line) in preview_lines.iter().enumerate() {
+        for line in &preview_lines {
             let colored = hl
                 .as_mut()
                 .and_then(|h| h.highlight_line(line))
                 .unwrap_or_else(|| format!("{dark}{line}{R}"));
-            let connector = if is_last(i) { "└" } else { "├" };
-            lines.push(format!("   {dark}{connector}{R} {colored}"));
+            lines.push(format!("    {colored}"));
         }
         if total_lines > shown {
             let remaining = total_lines - shown;
-            lines.push(format!("   {dark}└ … {remaining} more lines{R}"));
+            lines.push(format!("    {dark}… {remaining} more lines{R}"));
         }
     }
 
@@ -336,14 +332,14 @@ pub fn format_tool_output(
 pub fn format_plan(plan: &PlanView) -> Vec<String> {
     let t = theme::theme();
     let mut lines = Vec::new();
-    lines.push(format!("  {}Plan{R}", t.accent));
+    lines.push(format!(" {}Plan{R}", t.accent));
     for entry in &plan.entries {
         let (icon, color) = match entry.status {
             PlanEntryStatus::Completed => ("✓", t.green.as_str()),
             PlanEntryStatus::InProgress => ("●", t.accent.as_str()),
             PlanEntryStatus::Pending => ("○", t.dark.as_str()),
         };
-        lines.push(format!("   {color}{icon}{R} {}{R}", entry.content));
+        lines.push(format!("  {color}{icon}{R} {}{R}", entry.content));
     }
     lines
 }
@@ -401,29 +397,24 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
         .map(|s| format!("{s}/"))
         .unwrap_or_default();
 
+    let stats = match (insertions, deletions) {
+        (i, 0) => format!("{dark}+{i}{R}"),
+        (0, d) => format!("{dark}-{d}{R}"),
+        (i, d) => format!("{dark}+{i} -{d}{R}"),
+    };
+
     lines.push(format!(
-        "  {dot}●{R} \x1b[1m{verb}\x1b[0m({dark}{parent_hint}{R}{magenta}{filename}{R})"
+        " {dot}●{R} \x1b[1m{verb}\x1b[0m {dark}{parent_hint}{R}{magenta}{filename}{R}  {stats}"
     ));
 
-    let stats_text = if deletions == 0 {
-        format!("Added {insertions} lines")
-    } else if insertions == 0 {
-        format!("Removed {deletions} lines")
-    } else {
-        format!("Added {insertions} lines, removed {deletions} lines")
-    };
-    lines.push(format!("   {dark}├{R} {dark}{stats_text}{R}"));
-
     if groups.is_empty() {
-        lines.push(format!("   {dark}└ (no changes){R}"));
+        lines.push(format!("    {dark}(no changes){R}"));
         return lines;
     }
 
-    let mut diff_lines: Vec<String> = Vec::new();
-
     for (group_idx, group) in groups.iter().enumerate() {
         if group_idx > 0 {
-            diff_lines.push(format!("   {dark}├{R} {dark}⋯{R}"));
+            lines.push(format!("    {dark}⋯{R}"));
         }
 
         for op in group {
@@ -439,7 +430,7 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                 let formatted = match change.tag() {
                     ChangeTag::Delete => {
                         format!(
-                            "   {dark}├{R}{bg_del} {line_no_c}{line_no}{R}{bg_del} {red}- {change_trimmed}{R}{BG_RESET}"
+                            "   {bg_del} {line_no_c}{line_no}{R}{bg_del} {red}- {change_trimmed}{R}{BG_RESET}"
                         )
                     }
                     ChangeTag::Insert => {
@@ -448,7 +439,7 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                             .and_then(|h| h.highlight_line(change_trimmed))
                             .unwrap_or_else(|| format!("{green}{change_trimmed}{R}"));
                         format!(
-                            "   {dark}├{R}{bg_add} {line_no_c}{line_no}{R}{bg_add} {green}+ {R}{bg_add}{highlighted}{BG_RESET}"
+                            "   {bg_add} {line_no_c}{line_no}{R}{bg_add} {green}+ {R}{bg_add}{highlighted}{BG_RESET}"
                         )
                     }
                     ChangeTag::Equal => {
@@ -456,19 +447,14 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                             .as_mut()
                             .and_then(|h| h.highlight_line(change_trimmed))
                             .unwrap_or_else(|| format!("{dark}{change_trimmed}{R}"));
-                        format!("   {dark}├{R} {line_no_c}{line_no}{R}   {highlighted}")
+                        format!("    {line_no_c}{line_no}{R}   {highlighted}")
                     }
                 };
-                diff_lines.push(formatted);
+                lines.push(formatted);
             }
         }
     }
 
-    if let Some(last) = diff_lines.last_mut() {
-        *last = last.replacen('├', "└", 1);
-    }
-
-    lines.extend(diff_lines);
     lines
 }
 

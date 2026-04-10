@@ -32,7 +32,7 @@ pub fn render_markdown(text: &str, width: usize) -> Vec<String> {
             if in_code_block {
                 in_code_block = false;
                 code_highlighter = None;
-                lines.push(format!("  {C_CODE_FENCE}  ╰───{C_RESET}"));
+                lines.push(format!(" {C_CODE_FENCE} ╰─{C_RESET}"));
             } else {
                 in_code_block = true;
                 let lang = trimmed.trim_start_matches('`').trim();
@@ -46,7 +46,7 @@ pub fn render_markdown(text: &str, width: usize) -> Vec<String> {
                 } else {
                     format!(" {C_CODE_FENCE}{lang}{C_RESET}")
                 };
-                lines.push(format!("  {C_CODE_FENCE}  ╭───{lang_label}{C_RESET}"));
+                lines.push(format!(" {C_CODE_FENCE} ╭─{lang_label}{C_RESET}"));
             }
             continue;
         }
@@ -56,7 +56,7 @@ pub fn render_markdown(text: &str, width: usize) -> Vec<String> {
                 .as_mut()
                 .and_then(|highlighter| highlighter.highlight_line(raw_line))
                 .unwrap_or_else(|| format!("{C_CODE_BLOCK}{raw_line}{C_RESET}"));
-            lines.push(format!("  {C_CODE_FENCE}  │{C_RESET} {colored}"));
+            lines.push(format!(" {C_CODE_FENCE} │{C_RESET} {colored}"));
             continue;
         }
 
@@ -67,17 +67,17 @@ pub fn render_markdown(text: &str, width: usize) -> Vec<String> {
 
         if trimmed == "---" || trimmed == "***" || trimmed == "___" {
             lines.push(format!(
-                "  {C_CODE_FENCE}─────────────────────────{C_RESET}"
+                " {C_CODE_FENCE}─────────────────────────{C_RESET}"
             ));
             continue;
         }
 
         let rendered = if let Some(rest) = trimmed.strip_prefix("# ") {
-            format!("  {C_HEADER1}{}{C_RESET}", render_inline(rest))
+            format!(" {C_HEADER1}{}{C_RESET}", render_inline(rest))
         } else if let Some(rest) = trimmed.strip_prefix("## ") {
-            format!("  {C_HEADER2}{}{C_RESET}", render_inline(rest))
+            format!(" {C_HEADER2}{}{C_RESET}", render_inline(rest))
         } else if let Some(rest) = trimmed.strip_prefix("### ") {
-            format!("  {C_HEADER3}{}{C_RESET}", render_inline(rest))
+            format!(" {C_HEADER3}{}{C_RESET}", render_inline(rest))
         } else if let Some(rest) = blockquote_body(trimmed) {
             format!(
                 "{} {}{C_ITALIC}{}{C_RESET}",
@@ -88,7 +88,7 @@ pub fn render_markdown(text: &str, width: usize) -> Vec<String> {
         } else if let Some((prefix, rest)) = list_prefix(indent, trimmed) {
             format!("{prefix} {}", render_inline(rest))
         } else {
-            format!("{}{}", " ".repeat(2 + indent), render_inline(trimmed))
+            format!("{}{}", " ".repeat(1 + indent), render_inline(trimmed))
         };
 
         lines.extend(wrap_ansi(&rendered, width));
@@ -107,9 +107,9 @@ pub fn render_thinking(text: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     for raw_line in text.split('\n') {
         let rendered = if raw_line.is_empty() {
-            format!("  {C_THINKING_BAR}│{C_RESET}")
+            format!(" {C_THINKING_BAR}│{C_RESET}")
         } else {
-            format!("  {C_THINKING_BAR}│{C_RESET} {C_THINKING}{raw_line}{C_RESET}")
+            format!(" {C_THINKING_BAR}│{C_RESET} {C_THINKING}{raw_line}{C_RESET}")
         };
         lines.extend(wrap_ansi(&rendered, width));
     }
@@ -132,7 +132,7 @@ fn blockquote_body(trimmed: &str) -> Option<&str> {
 }
 
 fn quote_prefix(depth: usize) -> String {
-    let mut prefix = String::from("  ");
+    let mut prefix = String::from(" ");
     for _ in 0..depth.max(1) {
         prefix.push_str(C_THINKING_BAR);
         prefix.push('│');
@@ -143,7 +143,7 @@ fn quote_prefix(depth: usize) -> String {
 }
 
 fn list_prefix(indent: usize, trimmed: &str) -> Option<(String, &str)> {
-    let list_indent = " ".repeat(3 + indent);
+    let list_indent = " ".repeat(2 + indent);
 
     if let Some(rest) = trimmed
         .strip_prefix("- ")
@@ -358,8 +358,8 @@ mod tests {
         let rendered = render_markdown(text, 80).join("\n");
         assert!(rendered.contains("Header"));
         assert!(rendered.contains("•"));
-        assert!(rendered.contains("╭───"));
-        assert!(rendered.contains("╰───"));
+        assert!(rendered.contains("╭─"));
+        assert!(rendered.contains("╰─"));
     }
 
     #[test]

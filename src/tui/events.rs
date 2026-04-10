@@ -58,7 +58,7 @@ impl Tui {
                 self.activity_line_count = 0;
                 let mut pushed = 0u16;
                 if self.last_activity.is_some() {
-                    self.ensure_history_gap(2);
+                    self.ensure_history_gap(1);
                 }
                 self.history.push(
                     format_activity(&activity.title, activity.status),
@@ -180,7 +180,7 @@ impl Tui {
                     let _ = old_perm.responder.send(PermissionDecision::Cancelled);
                 }
 
-                let mut title_line = format!("  \x1b[38;5;222m⚠ {}\x1b[0m", req.title);
+                let mut title_line = format!(" \x1b[38;5;222m⚠ {}\x1b[0m", req.title);
                 if let Some(sub) = &req.subtitle {
                     title_line.push_str(&format!(" {C_DIM}{sub}{C_RESET}"));
                 }
@@ -188,7 +188,7 @@ impl Tui {
 
                 if !req.locations.is_empty() {
                     self.history.push(
-                        format!("    {C_DIM}{}{C_RESET}", req.locations.join(", ")),
+                        format!("   {C_DIM}{}{C_RESET}", req.locations.join(", ")),
                         LineType::Status,
                     );
                 }

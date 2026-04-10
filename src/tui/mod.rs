@@ -263,7 +263,7 @@ impl Tui {
         // Welcome
         self.history.push(
             format!(
-                "  {C_BOLD_CYAN}mythcode{C_RESET} {C_DARK}·{C_RESET} \x1b[1m{}\x1b[0m",
+                " {C_BOLD_CYAN}mythcode{C_RESET} {C_DARK}·{C_RESET} \x1b[1m{}\x1b[0m",
                 self.project_name
             ),
             LineType::Welcome,
@@ -271,19 +271,19 @@ impl Tui {
         if let Some(model) = &model_name {
             let short_model = shorten_model_name(model);
             self.history.push(
-                format!("  {C_DIM}{short_model} · /help · shift+tab{C_RESET}"),
+                format!(" {C_DIM}{short_model} · /help{C_RESET}"),
                 LineType::Welcome,
             );
         } else {
             self.history.push(
-                format!("  {C_DIM}/help · shift+tab{C_RESET}"),
+                format!(" {C_DIM}/help{C_RESET}"),
                 LineType::Welcome,
             );
         }
 
         let _terminal_guard = TerminalGuard::enter(TerminalGuardOptions {
             alternate_screen: true,
-            mouse_capture: false,
+            alternate_scroll: true,
             enhanced_keys: true,
         })?;
 
@@ -329,15 +329,6 @@ impl Tui {
                                         }
                                     }
                                 }
-                                Event::Mouse(mouse) => {
-                                    if let crossterm::event::MouseEventKind::ScrollUp = mouse.kind {
-                                        self.history.scroll_up(3, self.term_width as usize);
-                                        self.redraw()?;
-                                    } else if let crossterm::event::MouseEventKind::ScrollDown = mouse.kind {
-                                        self.history.scroll_down(3);
-                                        self.redraw()?;
-                                    }
-                                }
                                 Event::Resize(w, h) => {
                                     self.term_width = w;
                                     self.term_height = h;
@@ -363,7 +354,7 @@ impl Tui {
                                 ShutdownSignal::Sigint => {
                                     if pending_exit { break 'outer; }
                                     self.history.push(
-                                        format!("  {C_DIM}press ctrl+c again to exit{C_RESET}"),
+                                        format!(" {C_DIM}press ctrl+c again to exit{C_RESET}"),
                                         LineType::Status,
                                     );
                                     pending_exit = true;
@@ -600,17 +591,16 @@ impl Tui {
                                         self.redraw()?;
                                     }
                                 }
-                                _ => {}
-                            },
-                            Event::Mouse(mouse) => {
-                                if let crossterm::event::MouseEventKind::ScrollUp = mouse.kind {
+                                KeyCode::Up => {
                                     self.history.scroll_up(3, self.term_width as usize);
                                     self.redraw()?;
-                                } else if let crossterm::event::MouseEventKind::ScrollDown = mouse.kind {
+                                }
+                                KeyCode::Down => {
                                     self.history.scroll_down(3);
                                     self.redraw()?;
                                 }
-                            }
+                                _ => {}
+                            },
                             Event::Resize(w, h) => {
                                 self.term_width = w;
                                 self.term_height = h;
@@ -659,7 +649,7 @@ impl Tui {
 
         self.message_queue.push(trimmed.clone());
         self.history.push(
-            format!("  {C_DIM}queued: {trimmed}{C_RESET}"),
+            format!(" {C_DIM}queued: {trimmed}{C_RESET}"),
             LineType::Status,
         );
         true

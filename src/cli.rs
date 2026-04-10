@@ -303,7 +303,7 @@ async fn connect_with_loading(config: &AppConfig) -> Result<crate::acp_client::C
 
     let _guard = TerminalGuard::enter(TerminalGuardOptions {
         alternate_screen: false,
-        mouse_capture: false,
+        alternate_scroll: false,
         enhanced_keys: false,
     })?;
     let mut stdout = io::stdout();
@@ -424,7 +424,7 @@ fn pick_provider() -> Result<Option<AcpProvider>> {
     let mut selected = 0usize;
     let _guard = TerminalGuard::enter(TerminalGuardOptions {
         alternate_screen: true,
-        mouse_capture: false,
+        alternate_scroll: false,
         enhanced_keys: false,
     })?;
     let mut stdout = io::stdout();

@@ -76,17 +76,11 @@ impl Tui {
         } else {
             self.project_name.clone()
         };
-        if let Some(ref model) = self.current_model {
-            title.push_str(&format!(" · {}", super::shorten_model_name(model)));
-        }
-        for value in self.status_items.values() {
-            title.push_str(&format!(" · {value}"));
-        }
-        for img in &self.pending_images {
-            title.push_str(&format!(" [Image #{}]", img.number));
+        if !self.pending_images.is_empty() {
+            title.push_str(&format!(" +{}img", self.pending_images.len()));
         }
         if !self.message_queue.is_empty() {
-            title.push_str(&format!(" ({} queued)", self.message_queue.len()));
+            title.push_str(&format!(" [{}q]", self.message_queue.len()));
         }
         let is_active = self.pending_permission.is_none() && self.select_mode.is_none();
         let input_frame = self.input.render_frame(w, input_box_h, &title, is_active);
@@ -136,9 +130,9 @@ impl Tui {
                 break;
             }
             let line = if self.selected_suggestion == Some(i) {
-                format!("  {C_CYAN}›{C_RESET} {}", suggestion.label)
+                format!(" {C_CYAN}›{C_RESET} {}", suggestion.label)
             } else {
-                format!("    {C_DIM}{}{C_RESET}", suggestion.label)
+                format!("   {C_DIM}{}{C_RESET}", suggestion.label)
             };
             frame.set_line(row, line);
         }
@@ -172,7 +166,7 @@ impl Tui {
         };
         frame.set_line(
             sel_start,
-            format!("  {C_BOLD_CYAN}{}{C_RESET}  {filter_display}", sel.title),
+            format!(" {C_BOLD_CYAN}{}{C_RESET}  {filter_display}", sel.title),
         );
 
         for (visible_idx, &item_idx) in sel.filtered.iter().enumerate().take(10) {
@@ -183,11 +177,11 @@ impl Tui {
             let item = &sel.items[item_idx];
             let line = if visible_idx == sel.selected {
                 format!(
-                    "  {C_CYAN}▸ {}{C_RESET} {C_DIM}({}){C_RESET}",
+                    " {C_CYAN}▸ {}{C_RESET} {C_DIM}({}){C_RESET}",
                     item.display, item.id
                 )
             } else {
-                format!("    {C_DIM}{} ({}){C_RESET}", item.display, item.id)
+                format!("   {C_DIM}{} ({}){C_RESET}", item.display, item.id)
             };
             frame.set_line(row, line);
         }
@@ -203,7 +197,7 @@ impl Tui {
             const BG_RESET: &str = "\x1b[49m";
 
             let mut lines = vec![format!(
-                "  {C_DIM}↑↓ select · enter confirm · esc cancel{C_RESET}"
+                " {C_DIM}↑↓ enter esc{C_RESET}"
             )];
             for (i, opt) in perm.options.iter().enumerate() {
                 let is_accept = opt.kind.is_accept();
@@ -215,17 +209,17 @@ impl Tui {
                         (BG_RED, FG_WHITE)
                     };
                     let padded = format!(" ▸ {label} ");
-                    lines.push(format!("  {bg}{fg}{padded}{BG_RESET}{C_RESET}"));
+                    lines.push(format!(" {bg}{fg}{padded}{BG_RESET}{C_RESET}"));
                 } else {
                     let fg = if is_accept { FG_GREEN } else { FG_RED };
-                    lines.push(format!("    {fg}{label}{C_RESET}"));
+                    lines.push(format!("   {fg}{label}{C_RESET}"));
                 }
             }
             return lines;
         }
 
         if self.replaying_session {
-            return vec![format!("  {C_SPINNER}loading session history…{C_RESET}")];
+            return vec![format!(" {C_SPINNER}loading session history…{C_RESET}")];
         }
 
         if !self.spinner_active || self.turn_state == TurnState::Idle {
@@ -259,10 +253,10 @@ impl Tui {
         };
 
         let line = if short_hint.is_empty() {
-            format!("  {C_SPINNER}{shimmer}{C_RESET}  {C_DARK}{timer}{C_RESET}")
+            format!(" {C_SPINNER}{shimmer}{C_RESET}  {C_DARK}{timer}{C_RESET}")
         } else {
             format!(
-                "  {C_SPINNER}{shimmer}{C_RESET}  {C_DIM}{short_hint}{C_RESET}  {C_DARK}{timer}{C_RESET}"
+                " {C_SPINNER}{shimmer}{C_RESET}  {C_DARK}{timer}{C_RESET}  {C_DIM}{short_hint}{C_RESET}"
             )
         };
 

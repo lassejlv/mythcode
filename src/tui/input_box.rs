@@ -167,9 +167,9 @@ impl InputBox {
         let mut buf = Buffer::empty(area);
 
         let border_color = if is_active {
-            Color::Indexed(240)
+            Color::Indexed(237)
         } else {
-            Color::Indexed(236)
+            Color::Indexed(234)
         };
 
         let block = Block::default()
@@ -247,7 +247,7 @@ impl InputBox {
         }
 
         if self.content.is_empty() {
-            let placeholder = "Type a message...";
+            let placeholder = "…";
             let mut x = text_start;
             for ch in placeholder.chars() {
                 if x >= area.right() {
@@ -255,7 +255,7 @@ impl InputBox {
                 }
                 let cell = &mut buf[(x, inner.y)];
                 cell.set_char(ch);
-                cell.set_fg(Color::Indexed(242));
+                cell.set_fg(Color::Indexed(238));
                 x = x.saturating_add(ch.width().unwrap_or(1) as u16);
             }
         }

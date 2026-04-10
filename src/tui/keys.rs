@@ -210,7 +210,7 @@ impl Tui {
                     return Ok(KeyAction::Exit);
                 }
                 self.history.push(
-                    format!("  {C_DIM}press ctrl+c again to exit{C_RESET}"),
+                    format!(" {C_DIM}press ctrl+c again to exit{C_RESET}"),
                     LineType::Status,
                 );
                 *pending_exit = true;
@@ -230,20 +230,17 @@ impl Tui {
                 if let Some(output) = self.last_tool_outputs.last() {
                     let filename = highlight::extract_filename(&output.title);
                     let highlighted = highlight::highlight_content(&output.content, filename);
-                    let total = highlighted.len();
-
                     self.history.push(String::new(), LineType::Status);
                     self.history.push(
                         format!(
-                            "  \x1b[38;5;179m●{C_RESET} \x1b[1m{}\x1b[0m  {C_DIM}{} lines{C_RESET}",
+                            " \x1b[38;5;179m●{C_RESET} \x1b[1m{}\x1b[0m  {C_DIM}{} lines{C_RESET}",
                             output.title, output.total_lines
                         ),
                         LineType::Status,
                     );
-                    for (i, hl_line) in highlighted.iter().enumerate() {
-                        let connector = if i == total - 1 { "└" } else { "├" };
+                    for hl_line in &highlighted {
                         self.history.push(
-                            format!("    {C_DIM}{connector}{C_RESET}  {hl_line}"),
+                            format!("    {hl_line}"),
                             LineType::Activity,
                         );
                     }

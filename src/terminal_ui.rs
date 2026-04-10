@@ -2,8 +2,8 @@ use std::io::{self, Write};
 
 use crossterm::cursor::{self, SetCursorStyle};
 use crossterm::event::{
-    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::{execute, terminal};
 
@@ -75,13 +75,13 @@ impl FrameBuffer {
 #[derive(Debug, Clone, Copy)]
 pub struct TerminalGuardOptions {
     pub alternate_screen: bool,
-    pub mouse_capture: bool,
+    pub alternate_scroll: bool,
     pub enhanced_keys: bool,
 }
 
 pub struct TerminalGuard {
     alternate_screen: bool,
-    mouse_capture: bool,
+    alternate_scroll: bool,
     enhanced_keys: bool,
     bracketed_paste: bool,
 }
@@ -94,8 +94,9 @@ impl TerminalGuard {
         if options.alternate_screen {
             execute!(stdout, terminal::EnterAlternateScreen)?;
         }
-        if options.mouse_capture {
-            execute!(stdout, EnableMouseCapture)?;
+        if options.alternate_scroll {
+            write!(stdout, "\x1b[?1007h")?;
+            stdout.flush()?;
         }
 
         let enhanced_keys = if options.enhanced_keys
@@ -119,7 +120,7 @@ impl TerminalGuard {
 
         Ok(Self {
             alternate_screen: options.alternate_screen,
-            mouse_capture: options.mouse_capture,
+            alternate_scroll: options.alternate_scroll,
             enhanced_keys,
             bracketed_paste,
         })
@@ -137,8 +138,9 @@ impl Drop for TerminalGuard {
         if self.enhanced_keys {
             let _ = execute!(stdout, PopKeyboardEnhancementFlags);
         }
-        if self.mouse_capture {
-            let _ = execute!(stdout, DisableMouseCapture);
+        if self.alternate_scroll {
+            let _ = write!(stdout, "\x1b[?1007l");
+            let _ = stdout.flush();
         }
         if self.alternate_screen {
             let _ = execute!(stdout, terminal::LeaveAlternateScreen);

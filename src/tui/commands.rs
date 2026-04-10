@@ -99,7 +99,7 @@ impl Tui {
 
                 // Commands section
                 self.history.push(
-                    format!("  {C_BOLD_CYAN}Commands{C_RESET}"),
+                    format!(" {C_BOLD_CYAN}Commands{C_RESET}"),
                     LineType::Status,
                 );
                 self.history.push(String::new(), LineType::Status);
@@ -114,7 +114,7 @@ impl Tui {
                     ("/exit", "exit mythcode"),
                 ] {
                     self.history.push(
-                        format!("    \x1b[38;5;75m{cmd:<12}{C_RESET}{C_DIM}{desc}{C_RESET}"),
+                        format!("   \x1b[38;5;75m{cmd:<12}{C_RESET}{C_DIM}{desc}{C_RESET}"),
                         LineType::Status,
                     );
                 }
@@ -124,7 +124,7 @@ impl Tui {
                 if !agent_commands.is_empty() {
                     self.history.push(String::new(), LineType::Status);
                     self.history.push(
-                        format!("  {C_BOLD_CYAN}Agent Commands{C_RESET}"),
+                        format!(" {C_BOLD_CYAN}Agent Commands{C_RESET}"),
                         LineType::Status,
                     );
                     self.history.push(String::new(), LineType::Status);
@@ -132,7 +132,7 @@ impl Tui {
                         let name = format!("/{}", cmd.name);
                         self.history.push(
                             format!(
-                                "    \x1b[38;5;75m{name:<12}{C_RESET}{C_DIM}{}{C_RESET}",
+                                "   \x1b[38;5;75m{name:<12}{C_RESET}{C_DIM}{}{C_RESET}",
                                 cmd.description
                             ),
                             LineType::Status,
@@ -144,7 +144,7 @@ impl Tui {
                 if !self.extension_commands.is_empty() {
                     self.history.push(String::new(), LineType::Status);
                     self.history.push(
-                        format!("  {C_BOLD_CYAN}Extension Commands{C_RESET}"),
+                        format!(" {C_BOLD_CYAN}Extension Commands{C_RESET}"),
                         LineType::Status,
                     );
                     self.history.push(String::new(), LineType::Status);
@@ -152,7 +152,7 @@ impl Tui {
                         let name = format!("/{}", cmd.name);
                         self.history.push(
                             format!(
-                                "    \x1b[38;5;176m{name:<12}{C_RESET}{C_DIM}{}{C_RESET}",
+                                "   \x1b[38;5;176m{name:<12}{C_RESET}{C_DIM}{}{C_RESET}",
                                 cmd.description
                             ),
                             LineType::Status,
@@ -163,7 +163,7 @@ impl Tui {
                 // Keybindings section
                 self.history.push(String::new(), LineType::Status);
                 self.history.push(
-                    format!("  {C_BOLD_CYAN}Shortcuts{C_RESET}"),
+                    format!(" {C_BOLD_CYAN}Shortcuts{C_RESET}"),
                     LineType::Status,
                 );
                 self.history.push(String::new(), LineType::Status);
@@ -180,7 +180,7 @@ impl Tui {
                     ("@file", "mention a file"),
                 ] {
                     self.history.push(
-                        format!("    {C_DIM}{key:<14}{C_RESET}{C_DIM}{desc}{C_RESET}"),
+                        format!("   {C_DIM}{key:<14}{C_RESET}{C_DIM}{desc}{C_RESET}"),
                         LineType::Status,
                     );
                 }
