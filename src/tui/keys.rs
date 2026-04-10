@@ -1,6 +1,7 @@
 /// Key handling and autocomplete suggestions.
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tokio::sync::mpsc;
 
 use super::highlight;
 use super::history::{LineType, format_status};
@@ -8,6 +9,7 @@ use super::select::SelectKind;
 use super::{C_DIM, C_RESET, KeyAction, Suggestion, Tui};
 use crate::acp_client::AcpClient;
 use crate::input::FileIndex;
+use crate::types::AppEvent;
 
 impl Tui {
     pub(super) async fn handle_key(
@@ -16,6 +18,7 @@ impl Tui {
         client: &mut AcpClient,
         pending_exit: &mut bool,
         file_index: &mut FileIndex,
+        events: &mut mpsc::UnboundedReceiver<AppEvent>,
     ) -> Result<KeyAction> {
         // Select mode (model picker, etc.)
         if let Some(ref mut sel) = self.select_mode {
@@ -44,7 +47,9 @@ impl Tui {
                             SelectKind::Resume => {
                                 let id = item.id.clone();
                                 let name = item.display.clone();
-                                client.resume_session(&id).await?;
+                                client.load_session(&id).await?;
+                                self.history.clear();
+                                self.drain_replay_events(events).await;
                                 self.current_mode = client
                                     .session_snapshot()
                                     .current_mode()
@@ -52,13 +57,13 @@ impl Tui {
                                 *file_index =
                                     crate::cli::build_file_index(client.session_snapshot().cwd());
                                 self.clear_queue();
-                                self.history.clear();
-                                self.history.push(String::new(), LineType::Status);
+                                self.current_session_id = Some(id.clone());
+                                self.history.push(String::new(), LineType::Separator);
                                 self.history.push(
                                     format_status(&format!("resumed: {name}")),
                                     LineType::Status,
                                 );
-                                self.history.push(String::new(), LineType::Status);
+                                self.history.push(String::new(), LineType::Separator);
                             }
                         }
                     }

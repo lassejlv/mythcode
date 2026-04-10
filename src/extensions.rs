@@ -61,9 +61,7 @@ impl ExtensionHost {
                 Some(host)
             }
             Err(e) => {
-                let _ = event_tx.send(AppEvent::Warning(format!(
-                    "extension host failed: {e}"
-                )));
+                let _ = event_tx.send(AppEvent::Warning(format!("extension host failed: {e}")));
                 None
             }
         }
@@ -362,7 +360,8 @@ async fn spawn_host(
                                 }),
                             };
                             if let Some(id) = id {
-                                let resp = serde_json::json!({"jsonrpc":"2.0","id":id,"result":result});
+                                let resp =
+                                    serde_json::json!({"jsonrpc":"2.0","id":id,"result":result});
                                 let _ = reply_tx_exec.send(resp.to_string());
                             }
                         });
@@ -380,7 +379,8 @@ async fn spawn_host(
                 }
                 "action/setTheme" => {
                     if let Some(p) = params
-                        && let Ok(overrides) = serde_json::from_value::<crate::tui::theme::ThemeOverride>(p.clone())
+                        && let Ok(overrides) =
+                            serde_json::from_value::<crate::tui::theme::ThemeOverride>(p.clone())
                     {
                         crate::tui::theme::apply_override(&overrides);
                     }
@@ -395,9 +395,8 @@ async fn spawn_host(
                     if let Some(p) = params {
                         let ext = p["extension"].as_str().unwrap_or("unknown");
                         let err = p["error"].as_str().unwrap_or("unknown error");
-                        let _ = event_tx_clone.send(AppEvent::Warning(format!(
-                            "extension {ext}: {err}"
-                        )));
+                        let _ = event_tx_clone
+                            .send(AppEvent::Warning(format!("extension {ext}: {err}")));
                     }
                 }
                 _ => {}

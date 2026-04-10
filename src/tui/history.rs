@@ -85,6 +85,10 @@ impl History {
         self.scroll_offset = 0;
     }
 
+    pub fn take_lines(&mut self) -> Vec<RenderedLine> {
+        std::mem::take(&mut self.lines)
+    }
+
     fn wrapped_lines(&self, width: usize) -> Vec<RenderedLine> {
         let mut wrapped = Vec::new();
         for line in &self.lines {

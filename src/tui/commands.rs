@@ -31,6 +31,7 @@ impl Tui {
                 let cwd = client.session_snapshot().cwd().to_path_buf();
                 client.new_session(&cwd).await?;
                 *file_index = crate::cli::build_file_index(&cwd);
+                self.switch_to_session(&client.session_snapshot().id().0);
                 self.clear_queue();
                 self.history
                     .push(format_status("new session"), LineType::Status);

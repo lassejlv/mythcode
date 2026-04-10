@@ -153,7 +153,8 @@ fn list_prefix(indent: usize, trimmed: &str) -> Option<(String, &str)> {
     }
 
     if let Some(dot_pos) = trimmed.find(". ")
-        && dot_pos <= 3 && trimmed[..dot_pos].chars().all(|c| c.is_ascii_digit())
+        && dot_pos <= 3
+        && trimmed[..dot_pos].chars().all(|c| c.is_ascii_digit())
     {
         let prefix = format!("{list_indent}{C_BULLET}{}{C_RESET}", &trimmed[..=dot_pos]);
         return Some((prefix, &trimmed[dot_pos + 2..]));

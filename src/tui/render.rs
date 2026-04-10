@@ -101,7 +101,6 @@ impl Tui {
             );
         }
 
-
         self.render_suggestions(&mut frame, input_row, bottom_chrome, h);
         self.render_select_mode(&mut frame, input_row, bottom_chrome, h);
 

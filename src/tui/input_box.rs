@@ -66,6 +66,11 @@ impl InputBox {
         self.cursor_byte += 1;
     }
 
+    pub fn insert_str(&mut self, s: &str) {
+        self.content.insert_str(self.cursor_byte, s);
+        self.cursor_byte += s.len();
+    }
+
     pub fn line_count(&self) -> u16 {
         (self.content.matches('\n').count() + 1).min(6) as u16
     }

@@ -10,6 +10,7 @@ mod render;
 mod select;
 pub mod theme;
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -92,6 +93,9 @@ pub struct Tui {
     status_items: std::collections::HashMap<String, String>,
     image_counter: u32,
     pending_images: Vec<PendingImage>,
+    session_history_cache: HashMap<String, Vec<history::RenderedLine>>,
+    current_session_id: Option<String>,
+    replaying_session: bool,
 }
 
 pub struct PendingImage {
@@ -139,6 +143,9 @@ impl Tui {
             status_items: std::collections::HashMap::new(),
             image_counter: 0,
             pending_images: Vec::new(),
+            session_history_cache: HashMap::new(),
+            current_session_id: None,
+            replaying_session: false,
         }
     }
 
@@ -152,17 +159,48 @@ impl Tui {
             Err(_) => return,
         };
 
-        let png_data = encode_rgba_to_png(
-            img.width as u32,
-            img.height as u32,
-            &img.bytes,
-        );
+        let png_data = encode_rgba_to_png(img.width as u32, img.height as u32, &img.bytes);
         self.image_counter += 1;
         self.pending_images.push(PendingImage {
             number: self.image_counter,
             data: png_data,
             mime_type: "image/png".into(),
         });
+    }
+
+    fn save_session_history(&mut self, session_id: &str) {
+        let lines = self.history.take_lines();
+        if !lines.is_empty() {
+            self.session_history_cache
+                .insert(session_id.to_string(), lines);
+        }
+    }
+
+    fn switch_to_session(&mut self, session_id: &str) {
+        let old_id = self.current_session_id.replace(session_id.to_string());
+        if let Some(ref current_id) = old_id {
+            self.save_session_history(current_id);
+        }
+        self.history.clear();
+    }
+
+    pub async fn drain_replay_events(&mut self, events: &mut mpsc::UnboundedReceiver<AppEvent>) {
+        self.replaying_session = true;
+        while let Ok(event) = events.try_recv() {
+            self.dispatch_app_event(event);
+        }
+        // Yield once to allow any in-flight notifications to arrive
+        tokio::task::yield_now().await;
+        while let Ok(event) = events.try_recv() {
+            self.dispatch_app_event(event);
+        }
+        self.flush_assistant();
+        self.flush_thinking();
+        self.replaying_session = false;
+        self.turn_state = TurnState::Idle;
+        self.spinner_active = false;
+        self.last_activity = None;
+        self.activity_line_count = 0;
     }
 
     pub async fn run(
@@ -190,6 +228,7 @@ impl Tui {
         // Set initial mode and model
         self.current_mode = session.current_mode().map(|s| s.to_string());
         self.current_model = model_name.clone();
+        self.current_session_id = Some(session.id().to_string());
 
         // Welcome
         self.history.push(
@@ -249,7 +288,7 @@ impl Tui {
                         Some(event) = term_rx.recv() => {
                             match event {
                                 Event::Key(key) if key.kind == KeyEventKind::Press => {
-                                    match self.handle_key(key, client, &mut pending_exit, file_index).await? {
+                                    match self.handle_key(key, client, &mut pending_exit, file_index, events).await? {
                                         KeyAction::Continue => {}
                                         KeyAction::Exit => break 'outer,
                                         KeyAction::Submit(line) => {
@@ -272,6 +311,10 @@ impl Tui {
                                 Event::Resize(w, h) => {
                                     self.term_width = w;
                                     self.term_height = h;
+                                    self.redraw()?;
+                                }
+                                Event::Paste(data) => {
+                                    self.input.insert_str(&data);
                                     self.redraw()?;
                                 }
                                 _ => {}
@@ -535,6 +578,10 @@ impl Tui {
                             Event::Resize(w, h) => {
                                 self.term_width = w;
                                 self.term_height = h;
+                                self.redraw()?;
+                            }
+                            Event::Paste(data) => {
+                                self.input.insert_str(&data);
                                 self.redraw()?;
                             }
                             _ => {}

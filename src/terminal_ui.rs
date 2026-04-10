@@ -2,8 +2,8 @@ use std::io::{self, Write};
 
 use crossterm::cursor::{self, SetCursorStyle};
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::{execute, terminal};
 
@@ -83,6 +83,7 @@ pub struct TerminalGuard {
     alternate_screen: bool,
     mouse_capture: bool,
     enhanced_keys: bool,
+    bracketed_paste: bool,
 }
 
 impl TerminalGuard {
@@ -109,10 +110,18 @@ impl TerminalGuard {
             false
         };
 
+        let bracketed_paste = if options.enhanced_keys {
+            execute!(stdout, EnableBracketedPaste)?;
+            true
+        } else {
+            false
+        };
+
         Ok(Self {
             alternate_screen: options.alternate_screen,
             mouse_capture: options.mouse_capture,
             enhanced_keys,
+            bracketed_paste,
         })
     }
 }
@@ -122,6 +131,9 @@ impl Drop for TerminalGuard {
         let _ = terminal::disable_raw_mode();
         let mut stdout = io::stdout();
 
+        if self.bracketed_paste {
+            let _ = execute!(stdout, DisableBracketedPaste);
+        }
         if self.enhanced_keys {
             let _ = execute!(stdout, PopKeyboardEnhancementFlags);
         }

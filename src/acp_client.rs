@@ -208,16 +208,16 @@ impl AcpClient {
             .collect())
     }
 
-    pub async fn resume_session(&mut self, session_id: &str) -> Result<()> {
+    pub async fn load_session(&mut self, session_id: &str) -> Result<()> {
         let cwd = self.state.borrow().cwd().to_path_buf();
         let response = self
             .conn
-            .resume_session(acp::ResumeSessionRequest::new(
+            .load_session(acp::LoadSessionRequest::new(
                 session_id.to_string(),
                 cwd.clone(),
             ))
             .await
-            .context("failed to resume session")?;
+            .context("failed to load session")?;
 
         let mut session = SessionState::new(session_id.to_string(), cwd);
 
@@ -562,7 +562,9 @@ impl acp::Client for ClientHandler {
                         },
                     })
                     .collect();
-                let _ = self.event_tx.send(AppEvent::PlanUpdate(PlanView { entries }));
+                let _ = self
+                    .event_tx
+                    .send(AppEvent::PlanUpdate(PlanView { entries }));
             }
             _ => {}
         }

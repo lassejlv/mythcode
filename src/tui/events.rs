@@ -4,12 +4,12 @@ use std::time::Instant;
 use crate::types::{AppEvent, PermissionDecision};
 
 use super::history::{
-    format_activity, format_diff, format_plan, format_status, format_tool_output,
-    format_turn_separator, format_warning, LineType,
+    LineType, format_activity, format_diff, format_plan, format_status, format_tool_output,
+    format_turn_separator, format_warning,
 };
 use super::markdown::{render_markdown, render_thinking};
 use super::permission::PendingPermission;
-use super::{Tui, TurnState, C_DIM, C_RESET};
+use super::{C_DIM, C_RESET, Tui, TurnState};
 
 impl Tui {
     // ── Event handling ──────────────────────────────────────────────

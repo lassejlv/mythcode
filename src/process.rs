@@ -63,11 +63,7 @@ impl AcpProcess {
                 vec!["--acp".to_string()],
                 "gemini-acp",
             ),
-            AcpProvider::Cursor => (
-                "agent".to_string(),
-                vec!["acp".to_string()],
-                "cursor-acp",
-            ),
+            AcpProvider::Cursor => ("agent".to_string(), vec!["acp".to_string()], "cursor-acp"),
             AcpProvider::Amp => (
                 "npx".to_string(),
                 vec!["-y".to_string(), "amp-acp".to_string()],
