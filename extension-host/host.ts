@@ -3,7 +3,28 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join, basename } from "path";
 import { homedir } from "os";
-import type { MythcodeAPI, Disposable, InputContext, InputResult, PromptContext, PromptResult, ToolCallContext, ToolCallResult, CommandDefinition } from "@mythcode/sdk";
+// Types inlined to avoid runtime dependency on @mythcode/sdk
+interface Disposable { dispose(): void }
+interface InputContext { text: string }
+type InputResult = { text: string } | { handled: true } | void
+interface PromptContext { prompt: string }
+type PromptResult = { prompt: string } | { skip: true } | void
+interface ToolCallContext { toolCallId: string; title: string; kind: string; content: unknown[] }
+type ToolCallResult = { allow: true } | { allow: false; reason?: string } | void
+interface CommandDefinition { name: string; description: string; hint?: string; execute: (args: string) => void | Promise<void> }
+interface StateAPI { get<T = unknown>(key: string): Promise<T | undefined>; set(key: string, value: unknown): Promise<void> }
+interface MythcodeAPI {
+  on(event: string, handler: (ctx: any) => void): Disposable
+  onInput(handler: (ctx: InputContext) => InputResult | Promise<InputResult>): Disposable
+  onBeforePrompt(handler: (ctx: PromptContext) => PromptResult | Promise<PromptResult>): Disposable
+  onToolCall(handler: (ctx: ToolCallContext) => ToolCallResult | Promise<ToolCallResult>): Disposable
+  registerCommand(def: CommandDefinition): Disposable
+  registerTool(def: { name: string; description: string; inputSchema: Record<string, unknown>; execute: (input: Record<string, unknown>) => Promise<{ content: string; isError?: boolean }> }): Disposable
+  showMessage(text: string, level?: "info" | "warning"): void
+  setActivity(text: string): void
+  state: StateAPI
+  extension: { name: string; dir: string }
+}
 
 // JSON-RPC over stdin/stdout
 

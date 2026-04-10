@@ -88,6 +88,7 @@ pub struct Tui {
     last_tool_outputs: Vec<ToolOutputView>,
     live_output_lines: usize,
     message_queue: Vec<String>,
+    extension_commands: Vec<crate::types::SlashCommand>,
 }
 
 enum KeyAction {
@@ -129,6 +130,7 @@ impl Tui {
             last_tool_outputs: Vec::new(),
             live_output_lines: 0,
             message_queue: Vec::new(),
+            extension_commands: Vec::new(),
         }
     }
 
@@ -226,6 +228,11 @@ impl Tui {
             }
         });
 
+        // Load extension commands if host is running
+        if let Some(host) = ext_host.as_ref() {
+            self.extension_commands = host.commands().await;
+        }
+
         self.redraw()?;
 
         let mut pending_exit = false;
@@ -268,6 +275,10 @@ impl Tui {
                         }
                     }
                     Some(app_event) = events.recv() => {
+                        // Refresh extension commands when new events arrive
+                        if let Some(host) = ext_host.as_ref() {
+                            self.extension_commands = host.commands().await;
+                        }
                         self.dispatch_app_event(app_event);
                         self.redraw()?;
                     }

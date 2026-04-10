@@ -305,9 +305,10 @@ impl Tui {
 
         if content.starts_with('/') && !content.contains(char::is_whitespace) {
             let query = content.trim_start_matches('/').to_lowercase();
-            // Merge local + ACP commands
+            // Merge local + ACP + extension commands
             let mut commands = crate::cli::local_commands();
             commands.extend_from_slice(client.session_snapshot().commands());
+            commands.extend_from_slice(&self.extension_commands);
             let mut matches: Vec<(u8, u8, Suggestion)> = commands
                 .iter()
                 .filter_map(|cmd| {
