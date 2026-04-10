@@ -69,6 +69,7 @@ pub struct Tui {
     assistant_open: bool,
     thinking_open: bool,
     last_activity: Option<String>,
+    activity_line_count: u16,
     pending_permission: Option<PendingPermission>,
     select_mode: Option<SelectMode>,
     turn_count: u32,
@@ -109,6 +110,7 @@ impl Tui {
             assistant_open: false,
             thinking_open: false,
             last_activity: None,
+            activity_line_count: 0,
             pending_permission: None,
             select_mode: None,
             turn_count: 0,
@@ -159,15 +161,21 @@ impl Tui {
         self.history.push(String::new(), LineType::Welcome);
         self.history.push(
             format!(
-                "  {C_BOLD_CYAN}mythcode{C_RESET} {C_DARK}·{C_RESET} \x1b[1m{}\x1b[0m",
+                "  {C_BOLD_CYAN}mythcode{C_RESET} {C_DARK}v{}{C_RESET} {C_DARK}·{C_RESET} \x1b[1m{}\x1b[0m",
+                env!("CARGO_PKG_VERSION"),
                 self.project_name
             ),
             LineType::Welcome,
         );
         if let Some(model) = &model_name {
+            let short_model = shorten_model_name(model);
             self.history
-                .push(format!("  {C_DIM}{model}{C_RESET}"), LineType::Welcome);
+                .push(format!("  {C_DIM}{short_model}{C_RESET}"), LineType::Welcome);
         }
+        self.history.push(
+            format!("  {C_DARK}/help for commands · shift+tab to switch mode{C_RESET}"),
+            LineType::Welcome,
+        );
         self.history.push(String::new(), LineType::Welcome);
 
         // Terminal setup
@@ -476,5 +484,16 @@ impl Tui {
         );
 
         Ok(())
+    }
+}
+
+/// Shorten ugly model IDs like "fireworks-ai/accounts/fireworks/routers/kimi-k2p5-turbo"
+/// to just the last segment: "kimi-k2p5-turbo"
+fn shorten_model_name(model: &str) -> String {
+    // If it contains slashes, take the last segment
+    if model.contains('/') {
+        model.rsplit('/').next().unwrap_or(model).to_string()
+    } else {
+        model.to_string()
     }
 }

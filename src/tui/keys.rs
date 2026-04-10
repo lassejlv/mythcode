@@ -232,19 +232,19 @@ impl Tui {
 
                     self.history.push(String::new(), LineType::Status);
                     self.history.push(
-                        format!("  {C_DIM}── {} ({} lines) ──{C_RESET}", output.title, output.total_lines),
+                        format!(
+                            "  {C_DIM}◇ {}{C_RESET}  {C_DIM}{} lines{C_RESET}",
+                            output.title, output.total_lines
+                        ),
                         LineType::Status,
                     );
-                    for hl_line in &highlighted {
+                    for (i, hl_line) in highlighted.iter().enumerate() {
+                        let line_no = format!("{:>4}", i + 1);
                         self.history.push(
-                            format!("  {C_DIM}│{C_RESET} {hl_line}"),
+                            format!("  {C_DIM}{line_no}{C_RESET}  {hl_line}"),
                             LineType::Activity,
                         );
                     }
-                    self.history.push(
-                        format!("  {C_DIM}──────────────────{C_RESET}"),
-                        LineType::Status,
-                    );
                     self.history.push(String::new(), LineType::Status);
                 }
             }

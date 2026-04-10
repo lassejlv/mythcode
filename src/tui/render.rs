@@ -215,13 +215,14 @@ impl Tui {
         if let Some(ref model) = self.current_model {
             if model_row < h {
                 let mut stdout = io::stdout();
+                let short_model = super::shorten_model_name(model);
                 let mode_hint = if self.current_mode.is_some() {
                     format!("  {C_DARK}shift+tab to switch mode{C_RESET}")
                 } else {
                     String::new()
                 };
                 execute!(stdout, cursor::MoveTo(0, model_row))?;
-                write!(stdout, "\x1b[2K   {C_DARK}{model}{mode_hint}{C_RESET}")?;
+                write!(stdout, "\x1b[2K   {C_DARK}{short_model}{mode_hint}{C_RESET}")?;
                 stdout.flush()?;
             }
         }

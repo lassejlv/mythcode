@@ -204,7 +204,6 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
             .unwrap_or("");
         let mut hl = Highlighter::new(ext);
 
-        lines.push(format!("    {C_DARK}╭───{C_RESET}"));
         for (i, line) in preview_lines.iter().enumerate() {
             let line_no = format!("{:>3}", i + 1);
             let colored = hl
@@ -212,16 +211,14 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
                 .and_then(|h| h.highlight_line(line))
                 .unwrap_or_else(|| format!("{C_DARK}{line}{C_RESET}"));
             lines.push(format!(
-                "    {C_DARK}│{C_RESET} {C_LINE_NO}{line_no}{C_RESET}  {colored}"
+                "     {C_LINE_NO}{line_no}{C_RESET}  {colored}"
             ));
         }
         if total_lines > shown {
             let remaining = total_lines - shown;
             lines.push(format!(
-                "    {C_DARK}╰─── {remaining} more lines{C_RESET}"
+                "     {C_DARK}… {remaining} more lines{C_RESET}"
             ));
-        } else {
-            lines.push(format!("    {C_DARK}╰───{C_RESET}"));
         }
     }
 
@@ -245,7 +242,7 @@ pub fn format_plan(plan: &PlanView) -> Vec<String> {
     lines
 }
 
-/// Format a diff — clean minimal style with syntax highlighting
+/// Format a diff — clean style with syntax highlighting and background colors
 pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
     let mut lines = Vec::new();
     let old_text = diff.old_text.as_deref().unwrap_or("");
@@ -277,8 +274,9 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
 
     // Determine if this is a new file (Write) or edit
     let is_new_file = old_text.is_empty() && insertions > 0;
-    let icon = if is_new_file { "+" } else { "~" };
+    let icon = if is_new_file { "+" } else { "◆" };
     let icon_color = if is_new_file { C_GREEN } else { C_ACCENT };
+    let verb = if is_new_file { "Write" } else { "Edit" };
 
     // Short filename
     let filename = diff
@@ -305,10 +303,9 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
         format!("{C_GREEN}+{insertions}{C_RESET} {C_RED}-{deletions}{C_RESET}")
     };
 
-    // File header
-    lines.push(String::new());
+    // File header — integrated into top border
     lines.push(format!(
-        "  {icon_color}{icon}{C_RESET} {C_DARK}{parent_hint}{C_RESET}{C_MAGENTA}{filename}{C_RESET}  {stats}"
+        "  {icon_color}{icon}{C_RESET} {C_WHITE}{verb}{C_RESET} {C_DARK}{parent_hint}{C_RESET}{C_MAGENTA}{filename}{C_RESET}  {stats}"
     ));
 
     if groups.is_empty() {
@@ -316,11 +313,14 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
         return lines;
     }
 
-    lines.push(format!("    {C_DARK}╭───{C_RESET}"));
+    // Background colors for diff lines
+    const BG_RED: &str = "\x1b[48;2;60;20;25m";
+    const BG_GREEN: &str = "\x1b[48;2;20;50;30m";
+    const BG_RESET: &str = "\x1b[49m";
 
     for (group_idx, group) in groups.iter().enumerate() {
         if group_idx > 0 {
-            lines.push(format!("    {C_DARK}│{C_RESET}  {C_DARK}⋯{C_RESET}"));
+            lines.push(format!("      {C_DARK}⋯{C_RESET}"));
         }
 
         for op in group {
@@ -333,15 +333,10 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                 let change_str = change.to_string_lossy();
                 let change_trimmed = change_str.trim_end_matches('\n');
 
-                // Background colors for diff lines
-                const BG_RED: &str = "\x1b[48;2;60;20;25m";
-                const BG_GREEN: &str = "\x1b[48;2;20;50;30m";
-                const BG_RESET: &str = "\x1b[49m";
-
                 let formatted = match change.tag() {
                     ChangeTag::Delete => {
                         format!(
-                            "    {C_DARK}│{C_RESET}{BG_RED} {C_LINE_NO}{line_no}{C_RESET}{BG_RED} {C_RED}- {change_trimmed}{C_RESET}{BG_RESET}"
+                            "    {BG_RED} {C_LINE_NO}{line_no}{C_RESET}{BG_RED} {C_RED}- {change_trimmed}{C_RESET}{BG_RESET}"
                         )
                     }
                     ChangeTag::Insert => {
@@ -350,7 +345,7 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                             .and_then(|h| h.highlight_line(change_trimmed))
                             .unwrap_or_else(|| format!("{C_GREEN}{change_trimmed}{C_RESET}"));
                         format!(
-                            "    {C_DARK}│{C_RESET}{BG_GREEN} {C_LINE_NO}{line_no}{C_RESET}{BG_GREEN} {C_GREEN}+ {C_RESET}{BG_GREEN}{highlighted}{BG_RESET}"
+                            "    {BG_GREEN} {C_LINE_NO}{line_no}{C_RESET}{BG_GREEN} {C_GREEN}+ {C_RESET}{BG_GREEN}{highlighted}{BG_RESET}"
                         )
                     }
                     ChangeTag::Equal => {
@@ -359,7 +354,7 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                             .and_then(|h| h.highlight_line(change_trimmed))
                             .unwrap_or_else(|| format!("{C_DARK}{change_trimmed}{C_RESET}"));
                         format!(
-                            "    {C_DARK}│{C_RESET} {C_LINE_NO}{line_no}{C_RESET}   {highlighted}"
+                            "     {C_LINE_NO}{line_no}{C_RESET}   {highlighted}"
                         )
                     }
                 };
@@ -368,7 +363,6 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
         }
     }
 
-    lines.push(format!("    {C_DARK}╰───{C_RESET}"));
     lines
 }
 

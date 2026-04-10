@@ -56,11 +56,16 @@ impl Tui {
                 self.flush_assistant();
                 self.flush_thinking();
                 self.live_output_lines = 0; // new tool, reset live output
+                self.activity_line_count = 0;
                 // Add spacing before tool activity (unless it's the first one)
+                let mut pushed = 0u16;
                 if self.last_activity.is_some() {
                     self.history.push(String::new(), LineType::Separator);
+                    pushed += 1;
                 }
                 self.history.push(format_activity(&activity), LineType::Activity);
+                pushed += 1;
+                self.activity_line_count = pushed;
                 self.last_activity = Some(activity);
                 self.tool_active = true;
                 self.spinner_active = true;
@@ -77,18 +82,28 @@ impl Tui {
                 self.stop_spinner();
                 self.flush_assistant();
                 self.flush_thinking();
+                // Pop the activity line — the diff has its own header
+                if self.activity_line_count > 0 {
+                    self.history.pop_n(self.activity_line_count as usize);
+                    self.activity_line_count = 0;
+                }
+                // Also pop any previous tool output for the same tool
+                if self.live_output_lines > 0 {
+                    self.history.pop_n(self.live_output_lines);
+                    self.live_output_lines = 0;
+                }
                 let lines = format_diff(&diff);
                 self.history.push_lines(lines, LineType::Diff);
             }
             AppEvent::ToolOutput(output) => {
-                // Replace previous live output lines (including the activity line)
-                let pop_count = if self.live_output_lines > 0 {
-                    self.live_output_lines
-                } else {
-                    // First output for this tool — pop the activity announcement line
-                    1
-                };
-                self.history.pop_n(pop_count);
+                // Replace previous live output lines
+                if self.live_output_lines > 0 {
+                    self.history.pop_n(self.live_output_lines);
+                } else if self.activity_line_count > 0 {
+                    // First output for this tool — pop the activity announcement
+                    self.history.pop_n(self.activity_line_count as usize);
+                    self.activity_line_count = 0;
+                }
                 let lines = format_tool_output(&output.title, &output.content, output.total_lines);
                 self.live_output_lines = lines.len();
                 self.history.push_lines(lines, LineType::Activity);
@@ -223,6 +238,7 @@ impl Tui {
         self.thinking_open = false;
         self.printed_text = false;
         self.last_activity = None;
+        self.activity_line_count = 0;
         self.last_tool_outputs.clear();
         self.live_output_lines = 0;
         self.spinner_active = true;

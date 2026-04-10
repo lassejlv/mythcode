@@ -195,11 +195,11 @@ impl InputBox {
         let inner = block.inner(area);
         block.render(area, &mut buf);
 
-        // Render "> " prompt on first line
+        // Render "❯ " prompt on first line
         let prompt_col = inner.x;
         if inner.width > 2 {
             let cell = &mut buf[(prompt_col, inner.y)];
-            cell.set_char('>');
+            cell.set_char('❯');
             cell.set_fg(Color::Indexed(75));
         }
 
