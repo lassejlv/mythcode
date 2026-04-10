@@ -4,6 +4,7 @@ import { RouterProvider, createRouter, createRootRoute, createRoute } from '@tan
 import './index.css'
 import { RootLayout } from './routes/root'
 import { HomePage } from './routes/home'
+import { ReleasesPage } from './routes/releases'
 
 const rootRoute = createRootRoute({
   component: RootLayout,
@@ -15,7 +16,13 @@ const indexRoute = createRoute({
   component: HomePage,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute])
+const releasesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/releases',
+  component: ReleasesPage,
+})
+
+const routeTree = rootRoute.addChildren([indexRoute, releasesRoute])
 const router = createRouter({ routeTree })
 
 declare module '@tanstack/react-router' {

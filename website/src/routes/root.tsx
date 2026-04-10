@@ -17,14 +17,12 @@ export function RootLayout() {
             >
               GitHub
             </a>
-            <a
-              href="https://github.com/lassejlv/mythcode/releases"
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              to="/releases"
               className="text-muted-foreground hover:text-foreground transition-colors text-sm"
             >
               Releases
-            </a>
+            </Link>
           </nav>
         </div>
       </header>
