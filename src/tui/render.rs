@@ -212,17 +212,24 @@ impl Tui {
 
         // Model info line below input box
         let model_row = input_row + input_box_h;
-        if let Some(ref model) = self.current_model {
-            if model_row < h {
-                let mut stdout = io::stdout();
-                let short_model = super::shorten_model_name(model);
-                let mode_hint = if self.current_mode.is_some() {
-                    format!("  {C_DARK}shift+tab to switch mode{C_RESET}")
-                } else {
-                    String::new()
-                };
+        if model_row < h {
+            let mut stdout = io::stdout();
+            let mut parts: Vec<String> = Vec::new();
+
+            if let Some(ref model) = self.current_model {
+                parts.push(super::shorten_model_name(model));
+            }
+            if self.current_mode.is_some() {
+                parts.push("shift+tab to switch mode".into());
+            }
+            for (_, value) in &self.status_items {
+                parts.push(value.clone());
+            }
+
+            if !parts.is_empty() {
+                let joined = parts.join("  ");
                 execute!(stdout, cursor::MoveTo(0, model_row))?;
-                write!(stdout, "\x1b[2K   {C_DARK}{short_model}{mode_hint}{C_RESET}")?;
+                write!(stdout, "\x1b[2K   {C_DARK}{joined}{C_RESET}")?;
                 stdout.flush()?;
             }
         }

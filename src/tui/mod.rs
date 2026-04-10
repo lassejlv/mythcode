@@ -90,6 +90,7 @@ pub struct Tui {
     live_output_lines: usize,
     message_queue: Vec<String>,
     extension_commands: Vec<crate::types::SlashCommand>,
+    status_items: std::collections::HashMap<String, String>,
 }
 
 enum KeyAction {
@@ -132,6 +133,7 @@ impl Tui {
             live_output_lines: 0,
             message_queue: Vec::new(),
             extension_commands: Vec::new(),
+            status_items: std::collections::HashMap::new(),
         }
     }
 

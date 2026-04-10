@@ -53,6 +53,7 @@ pub enum AppEvent {
     ExtensionSetModel(#[allow(dead_code)] String),
     ExtensionSendMessage(String),
     ExtensionClearScreen,
+    ExtensionSetStatus { key: String, value: Option<String> },
     DebugProtocol(#[allow(dead_code)] String),
     ProcessStderr(#[allow(dead_code)] String),
 }

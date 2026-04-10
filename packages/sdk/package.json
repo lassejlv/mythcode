@@ -1,6 +1,6 @@
 {
   "name": "@mythcode/sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": false,
   "description": "TypeScript SDK for building mythcode extensions",
   "main": "index.js",

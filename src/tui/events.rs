@@ -141,6 +141,13 @@ impl Tui {
             AppEvent::ExtensionClearScreen => {
                 self.history.clear();
             }
+            AppEvent::ExtensionSetStatus { key, value } => {
+                if let Some(v) = value {
+                    self.status_items.insert(key, v);
+                } else {
+                    self.status_items.remove(&key);
+                }
+            }
             AppEvent::ExtensionSendMessage(text) => {
                 self.message_queue.push(text);
             }

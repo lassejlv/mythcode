@@ -189,6 +189,17 @@ function createAPI(ext: ExtensionEntry): MythcodeAPI {
       return await sendRequest("action/exec", { command });
     },
 
+    setStatus(key: string, text?: string) {
+      if (text === undefined || text === null) {
+        sendNotification("action/setStatus", { key, value: null });
+      } else {
+        sendNotification("action/setStatus", { key, value: text });
+      }
+    },
+    removeStatus(key: string) {
+      sendNotification("action/setStatus", { key, value: null });
+    },
+
     setTheme(colors: Record<string, string>) {
       sendRequest("action/setTheme", colors);
     },

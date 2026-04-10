@@ -22,6 +22,8 @@ export interface MythcodeAPI {
   showWarning(text: string): void;
   setActivity(text: string): void;
   clearScreen(): void;
+  setStatus(key: string, text?: string): void;
+  removeStatus(key: string): void;
 
   // Session control
   exit(): void;
