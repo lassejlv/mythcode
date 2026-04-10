@@ -271,17 +271,6 @@ function dispatchLifecycle(event: string, params: any) {
 
 // Handle incoming messages from Rust
 async function handleMessage(msg: any) {
-  // Response to a request we sent
-  if (msg.id != null && (msg.result !== undefined || msg.error !== undefined)) {
-    const pending = pendingRequests.get(msg.id);
-    if (pending) {
-      pendingRequests.delete(msg.id);
-      if (msg.error) pending.reject(msg.error);
-      else pending.resolve(msg.result);
-    }
-    return;
-  }
-
   const method = msg.method as string;
   const params = msg.params ?? {};
   const id = msg.id as number | undefined;
@@ -370,16 +359,34 @@ async function handleMessage(msg: any) {
   }
 }
 
-// Read stdin line by line
-async function readLoop() {
-  const reader = require("readline").createInterface({ input: process.stdin });
-  for await (const line of reader) {
-    if (!line.trim()) continue;
-    try {
-      const msg = JSON.parse(line);
-      handleMessage(msg);
-    } catch {}
-  }
+// Read stdin — raw data events so responses can be processed
+// concurrently while async handlers are still running
+function startReadLoop() {
+  let buffer = "";
+  process.stdin.setEncoding("utf-8");
+  process.stdin.on("data", (chunk: string) => {
+    buffer += chunk;
+    let newlineIdx;
+    while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIdx).trim();
+      buffer = buffer.slice(newlineIdx + 1);
+      if (!line) continue;
+      try {
+        const msg = JSON.parse(line);
+        if (msg.id != null && (msg.result !== undefined || msg.error !== undefined)) {
+          const pending = pendingRequests.get(msg.id);
+          if (pending) {
+            pendingRequests.delete(msg.id);
+            if (msg.error) pending.reject(msg.error);
+            else pending.resolve(msg.result);
+          }
+        } else {
+          handleMessage(msg).catch(() => {});
+        }
+      } catch {}
+    }
+  });
+  process.stdin.resume();
 }
 
-loadExtensions().then(() => readLoop());
+loadExtensions().then(() => startReadLoop());
