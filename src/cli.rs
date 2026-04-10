@@ -7,6 +7,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::acp_client::AcpClient;
 use crate::input::{self, FileIndex};
+use crate::terminal_ui::{FrameBuffer, TerminalGuard, TerminalGuardOptions};
 use crate::tui::Tui;
 use crate::types::{
     AcpProvider, AppConfig, AppEvent, PermissionDecision, ShutdownSignal, SlashCommand,
@@ -49,7 +50,10 @@ pub async fn run() -> Result<()> {
                 "unknown provider `{other}`. Use `opencode`, `codex`, `claude`, `pi`, or `gemini`."
             );
         }
-        None if input::is_interactive_terminal() => pick_provider()?,
+        None if input::is_interactive_terminal() => match pick_provider()? {
+            Some(provider) => provider,
+            None => return Ok(()),
+        },
         None => AcpProvider::OpenCode,
     };
 
@@ -116,6 +120,7 @@ async fn run_one_shot(
     signals: &mut SignalState,
     prompt: &str,
 ) -> Result<()> {
+    let mut stdout = io::stdout();
     let prompt_future = client.prompt(prompt);
     tokio::pin!(prompt_future);
 
@@ -126,35 +131,14 @@ async fn run_one_shot(
                 let _result = result?;
                 // Drain remaining events
                 while let Ok(event) = events.try_recv() {
-                    match event {
-                        AppEvent::AssistantText(text) => print!("{text}"),
-                        AppEvent::ThinkingText(_) => {}
-                        AppEvent::PermissionRequest(req) => {
-                            let _ = req.responder.send(PermissionDecision::Cancelled);
-                        }
-                        _ => {}
-                    }
+                    handle_stream_event(event, &mut stdout)?;
                 }
-                let _ = io::stdout().flush();
-                println!();
+                writeln!(stdout)?;
+                stdout.flush()?;
                 return Ok(());
             }
             Some(event) = events.recv() => {
-                match event {
-                    AppEvent::AssistantText(text) => {
-                        print!("{text}");
-                        let _ = io::stdout().flush();
-                    }
-                    AppEvent::PermissionRequest(req) => {
-                        // Auto-accept in one-shot
-                        let decision = req.options.iter()
-                            .find(|o| o.kind.is_accept())
-                            .map(|o| PermissionDecision::Selected(o.option_id.clone()))
-                            .unwrap_or(PermissionDecision::Cancelled);
-                        let _ = req.responder.send(decision);
-                    }
-                    _ => {}
-                }
+                handle_stream_event(event, &mut stdout)?;
             }
             signal = signals.recv() => {
                 match signal {
@@ -176,12 +160,13 @@ async fn run_non_interactive(
 ) -> Result<()> {
     let stdin = tokio::io::stdin();
     let mut lines = BufReader::new(stdin).lines();
+    let mut stdout = io::stdout();
 
     loop {
         let cwd = client.session_snapshot().cwd().to_path_buf();
         let label = cwd.file_name().and_then(|n| n.to_str()).unwrap_or(".");
-        print!("{label}> ");
-        io::stdout().flush()?;
+        write!(stdout, "{label}> ")?;
+        stdout.flush()?;
 
         let line = tokio::select! {
             maybe_line = lines.next_line() => {
@@ -217,28 +202,14 @@ async fn run_non_interactive(
                 result = &mut prompt_future => {
                     let _result = result?;
                     while let Ok(event) = events.try_recv() {
-                        if let AppEvent::AssistantText(text) = event {
-                            print!("{text}");
-                        }
+                        handle_stream_event(event, &mut stdout)?;
                     }
-                    println!();
+                    writeln!(stdout)?;
+                    stdout.flush()?;
                     break;
                 }
                 Some(event) = events.recv() => {
-                    match event {
-                        AppEvent::AssistantText(text) => {
-                            print!("{text}");
-                            let _ = io::stdout().flush();
-                        }
-                        AppEvent::PermissionRequest(req) => {
-                            let decision = req.options.iter()
-                                .find(|o| o.kind.is_accept())
-                                .map(|o| PermissionDecision::Selected(o.option_id.clone()))
-                                .unwrap_or(PermissionDecision::Cancelled);
-                            let _ = req.responder.send(decision);
-                        }
-                        _ => {}
-                    }
+                    handle_stream_event(event, &mut stdout)?;
                 }
                 signal = signals.recv() => {
                     match signal {
@@ -283,12 +254,34 @@ pub fn build_file_index(cwd: &Path) -> FileIndex {
     FileIndex::build(cwd).unwrap_or_default()
 }
 
+fn handle_stream_event(event: AppEvent, stdout: &mut impl Write) -> Result<()> {
+    match event {
+        AppEvent::AssistantText(text) => {
+            write!(stdout, "{text}")?;
+            stdout.flush()?;
+        }
+        AppEvent::PermissionRequest(req) => {
+            let decision = auto_permission_decision(&req.options);
+            let _ = req.responder.send(decision);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn auto_permission_decision(options: &[crate::types::PermissionOptionView]) -> PermissionDecision {
+    options
+        .iter()
+        .find(|option| option.kind.is_accept())
+        .map(|option| PermissionDecision::Selected(option.option_id.clone()))
+        .unwrap_or(PermissionDecision::Cancelled)
+}
+
 async fn connect_with_loading(config: &AppConfig) -> Result<crate::acp_client::ConnectedClient> {
-    use crossterm::{cursor, execute, terminal};
+    use crossterm::terminal;
     use std::time::Instant;
 
     const RESET: &str = "\x1b[0m";
-    const BOLD_CYAN: &str = "\x1b[1;38;5;75m";
     const DARK: &str = "\x1b[38;5;240m";
     const SPINNER_COLOR: &str = "\x1b[38;5;75m";
 
@@ -300,19 +293,14 @@ async fn connect_with_loading(config: &AppConfig) -> Result<crate::acp_client::C
         AcpProvider::Gemini => "Gemini",
     };
 
-    let connect_messages: &[&str] = &[
-        "Connecting…",
-        "Starting agent…",
-        "Initializing…",
-        "Establishing session…",
-        "Almost there…",
-    ];
+    let connect_messages: &[&str] = &["Connecting…", "Starting…", "Initializing…"];
 
+    let _guard = TerminalGuard::enter(TerminalGuardOptions {
+        alternate_screen: false,
+        mouse_capture: false,
+        enhanced_keys: false,
+    })?;
     let mut stdout = io::stdout();
-    let (_w, h) = terminal::size().unwrap_or((80, 24));
-
-    terminal::enable_raw_mode()?;
-    execute!(stdout, cursor::Hide)?;
 
     let start = Instant::now();
     let mut tick: usize = 0;
@@ -336,66 +324,41 @@ async fn connect_with_loading(config: &AppConfig) -> Result<crate::acp_client::C
                 let elapsed = start.elapsed().as_secs();
                 let msg_idx = (elapsed / 5) as usize % connect_messages.len();
                 let status = connect_messages[msg_idx];
-                let frame = crate::spinner::frame(tick);
                 let shimmer = crate::spinner::shimmer(tick, status);
                 let timer = crate::spinner::format_elapsed(elapsed);
-
-                let center_y = h / 2;
-
-                write!(stdout, "\x1b[2J\x1b[H")?;
-
-                // Branding
-                execute!(stdout, cursor::MoveTo(0, center_y.saturating_sub(2)))?;
-                write!(stdout, "  {BOLD_CYAN}mythcode{RESET}\r\n")?;
-
-                // Provider
-                execute!(stdout, cursor::MoveTo(0, center_y.saturating_sub(1)))?;
-                write!(stdout, "  {DARK}{provider_label}{RESET}\r\n")?;
-
-                // Blank line
-                execute!(stdout, cursor::MoveTo(0, center_y))?;
-                write!(stdout, "\r\n")?;
-
-                // Spinner + status
-                execute!(stdout, cursor::MoveTo(0, center_y + 1))?;
-                write!(stdout, "  {SPINNER_COLOR}{frame}{RESET}  {shimmer}  {DARK}{timer}{RESET}\r\n")?;
-
-                stdout.flush()?;
+                let (_, height) = terminal::size().unwrap_or((80, 24));
+                let center_y = height / 2;
+                let mut screen = FrameBuffer::new(height);
+                screen.set_line(
+                    center_y,
+                    format!(
+                        "  {SPINNER_COLOR}{shimmer}{RESET}  {DARK}{provider_label} · {timer}{RESET}"
+                    ),
+                );
+                screen.render(&mut stdout)?;
             }
         }
     };
 
-    // Clean up
-    terminal::disable_raw_mode()?;
-    execute!(stdout, cursor::Show)?;
-    write!(stdout, "\x1b[2J\x1b[H")?;
-    stdout.flush()?;
-
     result
 }
 
-fn pick_provider() -> Result<AcpProvider> {
+fn pick_provider() -> Result<Option<AcpProvider>> {
     use crossterm::event::{self, Event, KeyCode};
-    use crossterm::{cursor, execute, terminal};
+    use crossterm::terminal;
 
     // Colors
     const RESET: &str = "\x1b[0m";
-    const BOLD: &str = "\x1b[1m";
     const DIM: &str = "\x1b[38;5;240m";
-    const GRAY: &str = "\x1b[38;5;245m";
     const CYAN: &str = "\x1b[38;5;75m";
     const BOLD_CYAN: &str = "\x1b[1;38;5;75m";
     const GREEN: &str = "\x1b[38;5;114m";
     const MAGENTA: &str = "\x1b[38;5;176m";
-    #[allow(dead_code)]
-    const YELLOW: &str = "\x1b[38;5;179m";
     const ORANGE: &str = "\x1b[38;5;209m";
 
     struct ProviderEntry {
         provider: AcpProvider,
         name: &'static str,
-        package: &'static str,
-        description: &'static str,
         color: &'static str,
         icon: &'static str,
     }
@@ -404,56 +367,47 @@ fn pick_provider() -> Result<AcpProvider> {
         ProviderEntry {
             provider: AcpProvider::Claude,
             name: "Claude Code",
-            package: "@agentclientprotocol/claude-agent-acp",
-            description: "Anthropic's Claude Code with full coding capabilities",
             color: ORANGE,
             icon: "◆",
         },
         ProviderEntry {
             provider: AcpProvider::OpenCode,
             name: "OpenCode",
-            package: "opencode acp",
-            description: "Open-source multi-provider coding agent",
             color: GREEN,
             icon: "◇",
         },
         ProviderEntry {
             provider: AcpProvider::Codex,
             name: "Codex",
-            package: "@zed-industries/codex-acp",
-            description: "OpenAI Codex agent by OpenAI",
             color: CYAN,
             icon: "◈",
         },
         ProviderEntry {
             provider: AcpProvider::Pi,
             name: "Pi",
-            package: "pi-acp",
-            description: "Pi coding assistant",
             color: MAGENTA,
             icon: "●",
         },
         ProviderEntry {
             provider: AcpProvider::Gemini,
             name: "Gemini",
-            package: "gemini --acp",
-            description: "Google Gemini CLI agent",
             color: CYAN,
             icon: "◆",
         },
     ];
 
     let mut selected = 0usize;
+    let _guard = TerminalGuard::enter(TerminalGuardOptions {
+        alternate_screen: true,
+        mouse_capture: false,
+        enhanced_keys: false,
+    })?;
     let mut stdout = io::stdout();
-    let (_term_w, term_h) = terminal::size().unwrap_or((80, 24));
-
-    terminal::enable_raw_mode()?;
 
     loop {
-        write!(stdout, "\x1b[2J\x1b[H")?; // clear screen
-
-        // Center content vertically
-        let content_height = 4 + providers.len() * 3 + 3; // header + items + footer
+        let (_term_w, term_h) = terminal::size().unwrap_or((80, 24));
+        let mut screen = FrameBuffer::new(term_h);
+        let content_height = 2 + providers.len() + 2;
         let start_y = if (term_h as usize) > content_height + 4 {
             ((term_h as usize - content_height) / 2) as u16
         } else {
@@ -462,87 +416,42 @@ fn pick_provider() -> Result<AcpProvider> {
 
         let mut row = start_y;
 
-        // Logo / branding
-        execute!(stdout, cursor::MoveTo(0, row))?;
-        writeln!(stdout, "\r")?;
+        screen.set_line(row, format!("  {BOLD_CYAN}mythcode{RESET}"));
         row += 1;
-        execute!(stdout, cursor::MoveTo(0, row))?;
-        writeln!(stdout, "  {BOLD_CYAN}mythcode{RESET}\r")?;
-        row += 1;
-        execute!(stdout, cursor::MoveTo(0, row))?;
-        writeln!(
-            stdout,
-            "  {GRAY}Select a coding agent to connect to{RESET}\r"
-        )?;
-        row += 1;
-        execute!(stdout, cursor::MoveTo(0, row))?;
-        writeln!(stdout, "\r")?;
         row += 1;
 
-        // Provider cards
         for (i, entry) in providers.iter().enumerate() {
             let is_selected = i == selected;
 
-            execute!(stdout, cursor::MoveTo(0, row))?;
             if is_selected {
-                writeln!(
-                    stdout,
-                    "  {CYAN}▸{RESET} {color}{icon}{RESET}  {BOLD}{name}{RESET}",
-                    color = entry.color,
-                    icon = entry.icon,
-                    name = entry.name,
-                )?;
+                screen.set_line(
+                    row,
+                    format!(
+                        "  {CYAN}▸{RESET} {color}{icon}{RESET} {name}",
+                        color = entry.color,
+                        icon = entry.icon,
+                        name = entry.name,
+                    ),
+                );
             } else {
-                writeln!(
-                    stdout,
-                    "    {DIM}{icon}{RESET}  {DIM}{name}{RESET}",
-                    icon = entry.icon,
-                    name = entry.name,
-                )?;
-            }
-            write!(stdout, "\r")?;
-            row += 1;
-
-            execute!(stdout, cursor::MoveTo(0, row))?;
-            if is_selected {
-                writeln!(
-                    stdout,
-                    "       {GRAY}{desc}{RESET}\r",
-                    desc = entry.description,
-                )?;
-            } else {
-                writeln!(
-                    stdout,
-                    "       {DIM}{desc}{RESET}\r",
-                    desc = entry.description
-                )?;
-            }
-            row += 1;
-
-            // Show package name for selected item
-            execute!(stdout, cursor::MoveTo(0, row))?;
-            if is_selected {
-                writeln!(stdout, "       {DIM}{pkg}{RESET}\r", pkg = entry.package,)?;
-            } else {
-                writeln!(stdout, "\r")?;
+                screen.set_line(
+                    row,
+                    format!(
+                        "    {DIM}{icon} {name}{RESET}",
+                        icon = entry.icon,
+                        name = entry.name,
+                    ),
+                );
             }
             row += 1;
         }
 
-        // Footer
-        execute!(stdout, cursor::MoveTo(0, row))?;
-        writeln!(stdout, "\r")?;
         row += 1;
-        execute!(stdout, cursor::MoveTo(0, row))?;
-        writeln!(stdout, "  {DIM}↑↓ navigate  enter select  q quit{RESET}\r")?;
-        row += 1;
-        execute!(stdout, cursor::MoveTo(0, row))?;
-        writeln!(
-            stdout,
-            "  {DIM}or use {RESET}{DIM}--provider <name>{RESET}{DIM} to skip this menu{RESET}\r"
-        )?;
-
-        stdout.flush()?;
+        screen.set_line(
+            row,
+            format!("  {DIM}↑↓ navigate · enter select · q quit{RESET}"),
+        );
+        screen.render(&mut stdout)?;
 
         // Read key
         if let Event::Key(key) = event::read()? {
@@ -558,44 +467,54 @@ fn pick_provider() -> Result<AcpProvider> {
                     }
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
-                    terminal::disable_raw_mode()?;
-                    write!(stdout, "\x1b[2J\x1b[H")?;
-                    stdout.flush()?;
-                    return Ok(providers[selected].provider.clone());
+                    return Ok(Some(providers[selected].provider.clone()));
                 }
                 KeyCode::Char('1') => {
-                    terminal::disable_raw_mode()?;
-                    write!(stdout, "\x1b[2J\x1b[H")?;
-                    stdout.flush()?;
-                    return Ok(providers[0].provider.clone());
+                    return Ok(Some(providers[0].provider.clone()));
                 }
                 KeyCode::Char('2') => {
-                    terminal::disable_raw_mode()?;
-                    write!(stdout, "\x1b[2J\x1b[H")?;
-                    stdout.flush()?;
-                    return Ok(providers[1].provider.clone());
+                    return Ok(Some(providers[1].provider.clone()));
                 }
                 KeyCode::Char('3') => {
-                    terminal::disable_raw_mode()?;
-                    write!(stdout, "\x1b[2J\x1b[H")?;
-                    stdout.flush()?;
-                    return Ok(providers[2].provider.clone());
+                    return Ok(Some(providers[2].provider.clone()));
                 }
                 KeyCode::Char('4') if providers.len() >= 4 => {
-                    terminal::disable_raw_mode()?;
-                    write!(stdout, "\x1b[2J\x1b[H")?;
-                    stdout.flush()?;
-                    return Ok(providers[3].provider.clone());
+                    return Ok(Some(providers[3].provider.clone()));
                 }
                 KeyCode::Char('q') | KeyCode::Esc => {
-                    terminal::disable_raw_mode()?;
-                    write!(stdout, "\x1b[2J\x1b[H")?;
-                    stdout.flush()?;
-                    std::process::exit(0);
+                    return Ok(None);
                 }
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::types::{PermissionDecision, PermissionOptionKindView, PermissionOptionView};
+
+    use super::auto_permission_decision;
+
+    #[test]
+    fn auto_permission_prefers_accepting_option() {
+        let options = vec![
+            PermissionOptionView {
+                option_id: "deny".into(),
+                name: "Deny".into(),
+                kind: PermissionOptionKindView::RejectOnce,
+            },
+            PermissionOptionView {
+                option_id: "allow".into(),
+                name: "Allow".into(),
+                kind: PermissionOptionKindView::AllowOnce,
+            },
+        ];
+
+        assert_eq!(
+            auto_permission_decision(&options),
+            PermissionDecision::Selected("allow".into())
+        );
     }
 }
 

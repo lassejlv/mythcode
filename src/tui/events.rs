@@ -1,16 +1,15 @@
 /// App event handling, streaming buffer management, and turn management.
-
 use std::time::Instant;
 
 use crate::types::{AppEvent, PermissionDecision};
 
 use super::history::{
-    format_activity, format_diff, format_plan, format_status, format_tool_output,
-    format_turn_separator, format_user_message, format_warning, LineType,
+    LineType, format_activity, format_diff, format_plan, format_status, format_tool_output,
+    format_turn_separator, format_user_message, format_warning,
 };
-use super::markdown::wrap_ansi;
+use super::markdown::{render_markdown, render_thinking};
 use super::permission::PendingPermission;
-use super::{C_DIM, C_RESET, Tui};
+use super::{C_DIM, C_RESET, Tui, TurnState};
 
 impl Tui {
     // ── Event handling ──────────────────────────────────────────────
@@ -18,8 +17,6 @@ impl Tui {
     pub(super) fn handle_app_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::UserMessage(text) => {
-                // User messages replayed from session history
-                self.stop_spinner();
                 self.flush_assistant();
                 self.flush_thinking();
                 self.live_output_lines = 0;
@@ -28,32 +25,25 @@ impl Tui {
                 self.history.push_lines(lines, LineType::UserMessage);
             }
             AppEvent::AssistantText(text) => {
-                if text.trim().is_empty() && !self.assistant_open {
-                    // Don't kill the spinner for empty leading chunks
+                if text.trim().is_empty() && self.assistant_buffer.is_empty() {
                     return;
                 }
-                self.stop_spinner();
-                self.tool_active = false;
                 self.live_output_lines = 0;
-                if self.thinking_open {
+                if !self.thinking_buffer.is_empty() {
                     self.flush_thinking();
                     self.history.push(String::new(), LineType::Separator);
                 }
-                self.assistant_open = true;
                 self.assistant_buffer.push_str(&text);
+                self.turn_state = TurnState::Responding;
                 self.printed_text = true;
-                self.flush_complete_assistant_lines();
             }
             AppEvent::ThinkingText(text) => {
-                if text.trim().is_empty() && !self.thinking_open {
+                if text.trim().is_empty() && self.thinking_buffer.is_empty() {
                     return;
                 }
-                self.stop_spinner();
-                self.tool_active = false;
                 self.flush_assistant();
-                self.thinking_open = true;
                 self.thinking_buffer.push_str(&text);
-                self.flush_complete_thinking_lines();
+                self.turn_state = TurnState::Thinking;
             }
             AppEvent::Activity(activity) => {
                 if self.last_activity.as_deref() == Some(&activity) {
@@ -69,11 +59,12 @@ impl Tui {
                     self.history.push(String::new(), LineType::Separator);
                     pushed += 1;
                 }
-                self.history.push(format_activity(&activity), LineType::Activity);
+                self.history
+                    .push(format_activity(&activity), LineType::Activity);
                 pushed += 1;
                 self.activity_line_count = pushed;
                 self.last_activity = Some(activity);
-                self.tool_active = true;
+                self.turn_state = TurnState::ToolRunning;
                 self.spinner_active = true;
             }
             AppEvent::ModeChanged(mode) => {
@@ -85,7 +76,6 @@ impl Tui {
                 // Title shown in input box border, no need to log
             }
             AppEvent::ToolDiff(diff) => {
-                self.stop_spinner();
                 self.flush_assistant();
                 self.flush_thinking();
                 // Pop the activity line — the diff has its own header
@@ -100,6 +90,7 @@ impl Tui {
                 }
                 let lines = format_diff(&diff);
                 self.history.push_lines(lines, LineType::Diff);
+                self.turn_state = TurnState::ToolRunning;
             }
             AppEvent::ToolOutput(output) => {
                 // Replace previous live output lines
@@ -114,16 +105,16 @@ impl Tui {
                 self.live_output_lines = lines.len();
                 self.history.push_lines(lines, LineType::Activity);
                 self.last_tool_outputs.push(output);
+                self.turn_state = TurnState::ToolRunning;
             }
             AppEvent::PlanUpdate(plan) => {
-                self.stop_spinner();
                 self.flush_assistant();
                 self.flush_thinking();
                 let lines = format_plan(&plan);
                 self.history.push_lines(lines, LineType::Activity);
+                self.turn_state = TurnState::ToolRunning;
             }
             AppEvent::Warning(msg) => {
-                self.stop_spinner();
                 self.flush_assistant();
                 self.flush_thinking();
                 self.history.push(format_warning(&msg), LineType::Warning);
@@ -132,10 +123,7 @@ impl Tui {
                 if level == "warning" {
                     self.history.push(format_warning(&text), LineType::Warning);
                 } else {
-                    self.history.push(
-                        format_status(&text),
-                        LineType::Status,
-                    );
+                    self.history.push(format_status(&text), LineType::Status);
                 }
             }
             AppEvent::ExtensionClearScreen => {
@@ -164,7 +152,6 @@ impl Tui {
     pub(super) fn dispatch_app_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::PermissionRequest(req) => {
-                self.stop_spinner();
                 self.flush_assistant();
                 self.flush_thinking();
 
@@ -186,6 +173,8 @@ impl Tui {
                     );
                 }
 
+                self.suspended_turn_state = Some(self.turn_state);
+                self.turn_state = TurnState::AwaitingPermission;
                 self.pending_permission = Some(PendingPermission {
                     title: req.title,
                     subtitle: req.subtitle,
@@ -201,75 +190,80 @@ impl Tui {
 
     // ── Streaming buffer management ─────────────────────────────────
 
-    pub(super) fn flush_complete_assistant_lines(&mut self) {
-        let w = self.term_width as usize;
-        while let Some(newline_pos) = self.assistant_buffer.find('\n') {
-            let line = self.assistant_buffer[..newline_pos].to_string();
-            let rendered = self.md_parser.render_line(&line);
-            for wrapped in wrap_ansi(&rendered, w) {
-                self.history.push(wrapped, LineType::Assistant);
-            }
-            self.assistant_buffer = self.assistant_buffer[newline_pos + 1..].to_string();
-        }
-        self.partial_line = if self.assistant_buffer.is_empty() {
-            None
-        } else {
-            Some(self.md_parser.render_line(&self.assistant_buffer))
-        };
-    }
-
-    pub(super) fn flush_complete_thinking_lines(&mut self) {
-        let w = self.term_width as usize;
-        while let Some(newline_pos) = self.thinking_buffer.find('\n') {
-            let line = self.thinking_buffer[..newline_pos].to_string();
-            let rendered = self.md_parser.render_thinking_line(&line);
-            for wrapped in wrap_ansi(&rendered, w) {
-                self.history.push(wrapped, LineType::Thinking);
-            }
-            self.thinking_buffer = self.thinking_buffer[newline_pos + 1..].to_string();
-        }
-        self.thinking_partial = if self.thinking_buffer.is_empty() {
-            None
-        } else {
-            Some(self.md_parser.render_thinking_line(&self.thinking_buffer))
-        };
-    }
-
     pub(super) fn flush_assistant(&mut self) {
         if !self.assistant_buffer.is_empty() {
-            let w = self.term_width as usize;
-            let line = std::mem::take(&mut self.assistant_buffer);
-            let rendered = self.md_parser.render_line(&line);
-            for wrapped in wrap_ansi(&rendered, w) {
+            let rendered = render_markdown(
+                &std::mem::take(&mut self.assistant_buffer),
+                self.term_width as usize,
+            );
+            for wrapped in rendered {
                 self.history.push(wrapped, LineType::Assistant);
             }
-            self.partial_line = None;
         }
-        self.assistant_open = false;
     }
 
     pub(super) fn flush_thinking(&mut self) {
         if !self.thinking_buffer.is_empty() {
-            let w = self.term_width as usize;
-            let line = std::mem::take(&mut self.thinking_buffer);
-            let rendered = self.md_parser.render_thinking_line(&line);
-            for wrapped in wrap_ansi(&rendered, w) {
+            let rendered = render_thinking(
+                &std::mem::take(&mut self.thinking_buffer),
+                self.term_width as usize,
+            );
+            for wrapped in rendered {
                 self.history.push(wrapped, LineType::Thinking);
             }
-            self.thinking_partial = None;
         }
-        self.thinking_open = false;
+    }
+
+    pub(super) fn live_assistant_lines(&self) -> Vec<String> {
+        if self.assistant_buffer.is_empty() {
+            Vec::new()
+        } else {
+            render_markdown(&self.assistant_buffer, self.term_width as usize)
+        }
+    }
+
+    pub(super) fn live_thinking_lines(&self) -> Vec<String> {
+        if self.thinking_buffer.is_empty() {
+            Vec::new()
+        } else {
+            render_thinking(&self.thinking_buffer, self.term_width as usize)
+        }
+    }
+
+    pub(super) fn accept_pending_permission(&mut self) {
+        let Some(perm) = self.pending_permission.take() else {
+            return;
+        };
+        let option = &perm.options[perm.selected];
+        let decision = PermissionDecision::Selected(option.option_id.clone());
+        let summary = option.name.to_lowercase();
+        let _ = perm.responder.send(decision);
+        self.history.push(format_status(&summary), LineType::Status);
+        self.turn_state = self
+            .suspended_turn_state
+            .take()
+            .unwrap_or(TurnState::Thinking);
+    }
+
+    pub(super) fn cancel_pending_permission(&mut self) {
+        let Some(perm) = self.pending_permission.take() else {
+            return;
+        };
+        let _ = perm.responder.send(PermissionDecision::Cancelled);
+        self.history
+            .push(format_status("cancelled"), LineType::Status);
+        self.turn_state = self
+            .suspended_turn_state
+            .take()
+            .unwrap_or(TurnState::Thinking);
     }
 
     // ── Turn management ─────────────────────────────────────────────
 
     pub(super) fn start_turn(&mut self) {
-        self.stop_spinner();
         self.flush_assistant();
         self.flush_thinking();
         self.turn_count += 1;
-        self.assistant_open = false;
-        self.thinking_open = false;
         self.printed_text = false;
         self.last_activity = None;
         self.activity_line_count = 0;
@@ -278,7 +272,8 @@ impl Tui {
         self.spinner_active = true;
         self.spinner_frame = 0;
         self.turn_start = Some(Instant::now());
-        self.tool_active = false;
+        self.turn_state = TurnState::Thinking;
+        self.suspended_turn_state = None;
     }
 
     pub(super) fn finish_turn(&mut self, result: &crate::types::PromptResult) {
@@ -286,7 +281,8 @@ impl Tui {
         self.flush_assistant();
         self.flush_thinking();
 
-        let elapsed = self.turn_start
+        let elapsed = self
+            .turn_start
             .map(|t| crate::spinner::format_elapsed(t.elapsed().as_secs()))
             .unwrap_or_default();
 
@@ -301,7 +297,8 @@ impl Tui {
         let sep_lines = format_turn_separator(&display_elapsed);
         self.history.push_lines(sep_lines, LineType::Separator);
         self.turn_start = None;
-        self.tool_active = false;
+        self.turn_state = TurnState::Idle;
+        self.suspended_turn_state = None;
     }
 
     pub(super) fn stop_spinner(&mut self) {

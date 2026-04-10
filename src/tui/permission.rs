@@ -1,5 +1,4 @@
 /// Permission dialog state and handling.
-
 use crate::types::{PermissionDecision, PermissionOptionView};
 
 pub(super) struct PendingPermission {

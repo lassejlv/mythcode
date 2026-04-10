@@ -1,216 +1,225 @@
-/// Streaming markdown-to-ANSI renderer.
-/// Handles: **bold**, *italic*, `inline code`, # headers, - lists, fenced code blocks.
-/// Uses Catppuccin Mocha palette for a clean, modern look.
-
+/// Markdown-to-ANSI helpers used by the TUI.
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use unicode_width::UnicodeWidthChar;
 
 use super::highlight::Highlighter;
 
-// Catppuccin Mocha palette
 const C_RESET: &str = "\x1b[0m";
 const C_BOLD: &str = "\x1b[1m";
 const C_ITALIC: &str = "\x1b[3m";
-const C_CODE_INLINE: &str = "\x1b[38;2;166;227;161m";        // green — stands out inline
-const C_CODE_INLINE_BG: &str = "\x1b[48;2;30;40;35m";        // subtle green tint bg
+const C_CODE_INLINE: &str = "\x1b[38;2;166;227;161m";
+const C_CODE_INLINE_BG: &str = "\x1b[48;2;30;40;35m";
 const C_CODE_BLOCK: &str = "\x1b[38;5;248m";
 const C_CODE_FENCE: &str = "\x1b[38;5;240m";
-const C_HEADER1: &str = "\x1b[1;38;2;137;180;250m";          // bold blue
-const C_HEADER2: &str = "\x1b[1;38;2;205;214;244m";          // bold text
+const C_HEADER1: &str = "\x1b[1;38;2;137;180;250m";
+const C_HEADER2: &str = "\x1b[1;38;2;205;214;244m";
 const C_HEADER3: &str = "\x1b[1;38;5;249m";
-const C_BULLET: &str = "\x1b[38;2;137;180;250m";             // blue bullets
-const C_THINKING: &str = "\x1b[38;2;88;91;112m";             // overlay0 — subtle
-const C_THINKING_BAR: &str = "\x1b[38;2;69;71;90m";          // surface1
+const C_BULLET: &str = "\x1b[38;2;137;180;250m";
+const C_LINK: &str = "\x1b[38;5;117m";
+const C_THINKING: &str = "\x1b[38;2;88;91;112m";
+const C_THINKING_BAR: &str = "\x1b[38;2;69;71;90m";
 
-pub struct MarkdownParser {
-    in_code_block: bool,
-    code_lang: String,
-    code_highlighter: Option<Highlighter>,
-}
+pub fn render_markdown(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut in_code_block = false;
+    let mut code_highlighter: Option<Highlighter> = None;
 
-impl MarkdownParser {
-    pub fn new() -> Self {
-        Self {
-            in_code_block: false,
-            code_lang: String::new(),
-            code_highlighter: None,
-        }
-    }
+    for raw_line in text.split('\n') {
+        let trimmed = raw_line.trim_start();
+        let indent = raw_line.len().saturating_sub(trimmed.len());
 
-    /// Render a complete line of markdown to an ANSI string.
-    pub fn render_line(&mut self, line: &str) -> String {
-        // Fenced code block toggle
-        if line.trim_start().starts_with("```") {
-            if self.in_code_block {
-                // Closing fence
-                self.in_code_block = false;
-                self.code_lang.clear();
-                self.code_highlighter = None;
-                return format!("  {C_CODE_FENCE}  ╰───{C_RESET}");
+        if trimmed.starts_with("```") {
+            if in_code_block {
+                in_code_block = false;
+                code_highlighter = None;
+                lines.push(format!("  {C_CODE_FENCE}  ╰───{C_RESET}"));
             } else {
-                // Opening fence — extract language
-                self.in_code_block = true;
-                let lang = line.trim_start().trim_start_matches('`').trim();
-                self.code_lang = lang.to_string();
-                self.code_highlighter = if !lang.is_empty() {
-                    Highlighter::new(lang)
-                } else {
+                in_code_block = true;
+                let lang = trimmed.trim_start_matches('`').trim();
+                code_highlighter = if lang.is_empty() {
                     None
+                } else {
+                    Highlighter::new(lang)
                 };
                 let lang_label = if lang.is_empty() {
                     String::new()
                 } else {
                     format!(" {C_CODE_FENCE}{lang}{C_RESET}")
                 };
-                return format!("  {C_CODE_FENCE}  ╭───{lang_label}{C_RESET}");
+                lines.push(format!("  {C_CODE_FENCE}  ╭───{lang_label}{C_RESET}"));
             }
+            continue;
         }
 
-        // Inside code block: syntax highlighted
-        if self.in_code_block {
-            let colored = self.code_highlighter
+        if in_code_block {
+            let colored = code_highlighter
                 .as_mut()
-                .and_then(|h| h.highlight_line(line))
-                .unwrap_or_else(|| format!("{C_CODE_BLOCK}{line}{C_RESET}"));
-            return format!("  {C_CODE_FENCE}  │{C_RESET} {colored}");
+                .and_then(|highlighter| highlighter.highlight_line(raw_line))
+                .unwrap_or_else(|| format!("{C_CODE_BLOCK}{raw_line}{C_RESET}"));
+            lines.push(format!("  {C_CODE_FENCE}  │{C_RESET} {colored}"));
+            continue;
         }
 
-        let trimmed = line.trim_start();
-
-        // Headers
-        if let Some(rest) = trimmed.strip_prefix("### ") {
-            return format!("  {C_HEADER3}{rest}{C_RESET}");
-        }
-        if let Some(rest) = trimmed.strip_prefix("## ") {
-            return format!("  {C_HEADER2}{rest}{C_RESET}");
-        }
-        if let Some(rest) = trimmed.strip_prefix("# ") {
-            return format!("  {C_HEADER1}{rest}{C_RESET}");
+        if trimmed.is_empty() {
+            lines.push(String::new());
+            continue;
         }
 
-        // Horizontal rule
         if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-            return format!("  {C_CODE_FENCE}─────────────────────────{C_RESET}");
+            lines.push(format!(
+                "  {C_CODE_FENCE}─────────────────────────{C_RESET}"
+            ));
+            continue;
         }
 
-        // Unordered list items
-        if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
-            let rendered = render_inline(rest);
-            return format!("    {C_BULLET}•{C_RESET} {rendered}");
-        }
-
-        // Nested list items (  - or   *)
-        if let Some(rest) = trimmed.strip_prefix("  - ").or_else(|| trimmed.strip_prefix("  * ")) {
-            let rendered = render_inline(rest);
-            return format!("      {C_BULLET}•{C_RESET} {rendered}");
-        }
-
-        // Ordered list items (1. 2. etc)
-        if let Some(dot_pos) = trimmed.find(". ") {
-            if dot_pos <= 3 && trimmed[..dot_pos].chars().all(|c| c.is_ascii_digit()) {
-                let num = &trimmed[..dot_pos];
-                let rest = &trimmed[dot_pos + 2..];
-                let rendered = render_inline(rest);
-                return format!("    {C_BULLET}{num}.{C_RESET} {rendered}");
-            }
-        }
-
-        // Blockquote
-        if let Some(rest) = trimmed.strip_prefix("> ") {
-            let rendered = render_inline(rest);
-            return format!("  {C_THINKING_BAR}│{C_RESET} {C_ITALIC}{rendered}{C_RESET}");
-        }
-
-        // Regular paragraph text
-        let rendered = render_inline(trimmed);
-        if line.is_empty() {
-            String::new()
+        let rendered = if let Some(rest) = trimmed.strip_prefix("# ") {
+            format!("  {C_HEADER1}{}{C_RESET}", render_inline(rest))
+        } else if let Some(rest) = trimmed.strip_prefix("## ") {
+            format!("  {C_HEADER2}{}{C_RESET}", render_inline(rest))
+        } else if let Some(rest) = trimmed.strip_prefix("### ") {
+            format!("  {C_HEADER3}{}{C_RESET}", render_inline(rest))
+        } else if let Some(rest) = blockquote_body(trimmed) {
+            format!(
+                "{} {}{C_ITALIC}{}{C_RESET}",
+                quote_prefix(blockquote_depth(trimmed)),
+                C_RESET,
+                render_inline(rest)
+            )
+        } else if let Some((prefix, rest)) = list_prefix(indent, trimmed) {
+            format!("{prefix} {}", render_inline(rest))
         } else {
-            format!("  {rendered}")
+            format!("{}{}", " ".repeat(2 + indent), render_inline(trimmed))
+        };
+
+        lines.extend(wrap_ansi(&rendered, width));
+    }
+
+    if lines.last().is_some_and(String::is_empty) {
+        while lines.last().is_some_and(String::is_empty) && lines.len() > 1 {
+            lines.pop();
         }
     }
 
-    /// Render thinking text — dim with a left bar
-    pub fn render_thinking_line(&self, line: &str) -> String {
-        if line.is_empty() {
-            return format!("  {C_THINKING_BAR}│{C_RESET}");
-        }
-        format!("  {C_THINKING_BAR}│{C_RESET} {C_THINKING}{line}{C_RESET}")
-    }
+    lines
 }
 
-/// Render inline markdown: **bold**, *italic*, `code`
-fn render_inline(text: &str) -> String {
-    let mut result = String::with_capacity(text.len() + 64);
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
+pub fn render_thinking(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for raw_line in text.split('\n') {
+        let rendered = if raw_line.is_empty() {
+            format!("  {C_THINKING_BAR}│{C_RESET}")
+        } else {
+            format!("  {C_THINKING_BAR}│{C_RESET} {C_THINKING}{raw_line}{C_RESET}")
+        };
+        lines.extend(wrap_ansi(&rendered, width));
+    }
+    lines
+}
 
-    while i < len {
-        // **bold**
-        if i + 1 < len && chars[i] == '*' && chars[i + 1] == '*' {
-            if let Some(end) = find_closing(&chars, i + 2, &['*', '*']) {
-                result.push_str(C_BOLD);
-                let inner: String = chars[i + 2..end].iter().collect();
-                result.push_str(&inner);
-                result.push_str(C_RESET);
-                i = end + 2;
-                continue;
-            }
+fn blockquote_depth(trimmed: &str) -> usize {
+    trimmed.chars().take_while(|ch| *ch == '>').count()
+}
+
+fn blockquote_body(trimmed: &str) -> Option<&str> {
+    let depth = blockquote_depth(trimmed);
+    if depth == 0 {
+        return None;
+    }
+    trimmed[depth..]
+        .trim_start()
+        .strip_prefix("")
+        .map(|_| trimmed[depth..].trim_start())
+}
+
+fn quote_prefix(depth: usize) -> String {
+    let mut prefix = String::from("  ");
+    for _ in 0..depth.max(1) {
+        prefix.push_str(C_THINKING_BAR);
+        prefix.push('│');
+        prefix.push_str(C_RESET);
+        prefix.push(' ');
+    }
+    prefix
+}
+
+fn list_prefix(indent: usize, trimmed: &str) -> Option<(String, &str)> {
+    let list_indent = " ".repeat(4 + indent);
+
+    if let Some(rest) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+    {
+        return Some((format!("{list_indent}{C_BULLET}•{C_RESET}"), rest));
+    }
+
+    if let Some(dot_pos) = trimmed.find(". ") {
+        if dot_pos <= 3 && trimmed[..dot_pos].chars().all(|c| c.is_ascii_digit()) {
+            let prefix = format!("{list_indent}{C_BULLET}{}{C_RESET}", &trimmed[..=dot_pos]);
+            return Some((prefix, &trimmed[dot_pos + 2..]));
         }
+    }
 
-        // *italic*
-        if chars[i] == '*' && (i + 1 < len && chars[i + 1] != ' ') {
-            if let Some(end) = find_closing_single(&chars, i + 1, '*') {
-                if end > i + 1 {
-                    result.push_str(C_ITALIC);
-                    let inner: String = chars[i + 1..end].iter().collect();
-                    result.push_str(&inner);
-                    result.push_str(C_RESET);
-                    i = end + 1;
-                    continue;
+    None
+}
+
+fn render_inline(text: &str) -> String {
+    let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let parser = Parser::new_ext(text, options);
+    let mut out = String::new();
+    let mut stack: Vec<&'static str> = Vec::new();
+
+    for event in parser {
+        match event {
+            Event::Start(Tag::Emphasis) => {
+                stack.push(C_ITALIC);
+                out.push_str(C_ITALIC);
+            }
+            Event::Start(Tag::Strong) => {
+                stack.push(C_BOLD);
+                out.push_str(C_BOLD);
+            }
+            Event::Start(Tag::Link { .. }) => {
+                stack.push(C_LINK);
+                out.push_str(C_LINK);
+            }
+            Event::End(TagEnd::Emphasis | TagEnd::Strong | TagEnd::Link) => {
+                let _ = stack.pop();
+                out.push_str(C_RESET);
+                for style in &stack {
+                    out.push_str(style);
                 }
             }
-        }
-
-        // `inline code` — with background tint
-        if chars[i] == '`' {
-            if let Some(end) = find_closing_single(&chars, i + 1, '`') {
-                result.push_str(C_CODE_INLINE_BG);
-                result.push_str(C_CODE_INLINE);
-                result.push(' ');
-                let inner: String = chars[i + 1..end].iter().collect();
-                result.push_str(&inner);
-                result.push(' ');
-                result.push_str(C_RESET);
-                i = end + 1;
-                continue;
+            Event::Code(code) => {
+                out.push_str(C_CODE_INLINE_BG);
+                out.push_str(C_CODE_INLINE);
+                out.push(' ');
+                out.push_str(&code);
+                out.push(' ');
+                out.push_str(C_RESET);
+                for style in &stack {
+                    out.push_str(style);
+                }
             }
-        }
-
-        result.push(chars[i]);
-        i += 1;
-    }
-
-    result
-}
-
-fn find_closing(chars: &[char], start: usize, pattern: &[char; 2]) -> Option<usize> {
-    let len = chars.len();
-    for i in start..len.saturating_sub(1) {
-        if chars[i] == pattern[0] && chars[i + 1] == pattern[1] {
-            return Some(i);
+            Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => out.push_str(&text),
+            Event::SoftBreak | Event::HardBreak => out.push(' '),
+            Event::TaskListMarker(checked) => out.push_str(if checked { "[x] " } else { "[ ] " }),
+            Event::Rule => out.push_str("─────────────────────────"),
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Indented))
+            | Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_)))
+            | Event::End(TagEnd::CodeBlock)
+            | Event::FootnoteReference(_)
+            | Event::Start(_)
+            | Event::End(_)
+            | Event::InlineMath(_)
+            | Event::DisplayMath(_) => {}
         }
     }
-    None
-}
 
-fn find_closing_single(chars: &[char], start: usize, ch: char) -> Option<usize> {
-    for i in start..chars.len() {
-        if chars[i] == ch {
-            return Some(i);
-        }
+    if !stack.is_empty() {
+        out.push_str(C_RESET);
     }
-    None
+
+    out
 }
 
 /// Wrap a rendered ANSI line to fit within `width` columns.
@@ -336,4 +345,26 @@ fn parse_segments(s: &str) -> Vec<Segment> {
         segments.push(Segment::Text(text_buf));
     }
     segments
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{render_markdown, render_thinking};
+
+    #[test]
+    fn renders_markdown_lists_and_fences() {
+        let text = "# Header\n- one\n- two\n```rust\nlet x = 1;\n```";
+        let rendered = render_markdown(text, 80).join("\n");
+        assert!(rendered.contains("Header"));
+        assert!(rendered.contains("•"));
+        assert!(rendered.contains("╭───"));
+        assert!(rendered.contains("╰───"));
+    }
+
+    #[test]
+    fn wraps_thinking_output() {
+        let rendered = render_thinking("this is a fairly long thinking line", 12);
+        assert!(rendered.len() > 1);
+        assert!(rendered[0].contains("│"));
+    }
 }

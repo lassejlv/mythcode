@@ -1,16 +1,13 @@
 /// Key handling and autocomplete suggestions.
-
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::acp_client::AcpClient;
-use crate::input::FileIndex;
-use crate::types::PermissionDecision;
-
 use super::highlight;
-use super::history::{format_status, LineType};
+use super::history::{LineType, format_status};
 use super::select::SelectKind;
 use super::{C_DIM, C_RESET, KeyAction, Suggestion, Tui};
+use crate::acp_client::AcpClient;
+use crate::input::FileIndex;
 
 impl Tui {
     pub(super) async fn handle_key(
@@ -48,8 +45,13 @@ impl Tui {
                                 let id = item.id.clone();
                                 let name = item.display.clone();
                                 client.resume_session(&id).await?;
-                                self.current_mode = client.session_snapshot().current_mode().map(|s| s.to_string());
-                                *file_index = crate::cli::build_file_index(client.session_snapshot().cwd());
+                                self.current_mode = client
+                                    .session_snapshot()
+                                    .current_mode()
+                                    .map(|s| s.to_string());
+                                *file_index =
+                                    crate::cli::build_file_index(client.session_snapshot().cwd());
+                                self.clear_queue();
                                 self.history.clear();
                                 self.history.push(String::new(), LineType::Status);
                                 self.history.push(
@@ -104,19 +106,12 @@ impl Tui {
                     return Ok(KeyAction::Continue);
                 }
                 KeyCode::Enter => {
-                    let perm = self.pending_permission.take().unwrap();
-                    let option = &perm.options[perm.selected];
-                    let decision = PermissionDecision::Selected(option.option_id.clone());
-                    let summary = option.name.to_lowercase();
-                    let _ = perm.responder.send(decision);
-                    self.history.push(format_status(&summary), LineType::Status);
+                    self.accept_pending_permission();
                     self.redraw()?;
                     return Ok(KeyAction::Continue);
                 }
                 KeyCode::Esc => {
-                    let perm = self.pending_permission.take().unwrap();
-                    let _ = perm.responder.send(PermissionDecision::Cancelled);
-                    self.history.push(format_status("cancelled"), LineType::Status);
+                    self.cancel_pending_permission();
                     self.redraw()?;
                     return Ok(KeyAction::Continue);
                 }
@@ -189,19 +184,16 @@ impl Tui {
                 self.redraw()?;
                 return Ok(KeyAction::Continue);
             }
-            KeyCode::Enter if key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => {
+            KeyCode::Enter
+                if key
+                    .modifiers
+                    .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
+            {
                 self.input.insert_newline();
             }
             KeyCode::Enter => {
-                let current = self.input.take_content();
-                // Combine queued messages with current
-                let mut parts = std::mem::take(&mut self.message_queue);
-                let trimmed = current.trim().to_string();
-                if !trimmed.is_empty() {
-                    parts.push(trimmed);
-                }
-                let combined = parts.join("\n");
-                return Ok(KeyAction::Submit(combined));
+                let trimmed = self.input.take_content().trim().to_string();
+                return Ok(KeyAction::Submit(trimmed));
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if *pending_exit {
@@ -267,28 +259,17 @@ impl Tui {
             KeyCode::Up => self.input.history_prev(),
             KeyCode::Down => self.input.history_next(),
             KeyCode::PageUp => {
-                self.history.scroll_up(self.term_height as usize / 2);
+                self.history
+                    .scroll_up(self.term_height as usize / 2, self.term_width as usize);
             }
             KeyCode::PageDown => {
                 self.history.scroll_down(self.term_height as usize / 2);
             }
             KeyCode::Tab => {
-                // If suggestions are available, cycle them
                 self.update_suggestions_with_client(file_index, client);
                 if !self.suggestions.is_empty() {
                     self.selected_suggestion = Some(0);
                     self.input.set_content(&self.suggestions[0].value.clone());
-                } else {
-                    // Queue the current message and clear input for the next
-                    let text = self.input.take_content();
-                    let trimmed = text.trim().to_string();
-                    if !trimmed.is_empty() {
-                        self.message_queue.push(trimmed.clone());
-                        self.history.push(
-                            format!("  {C_DIM}queued: {trimmed}{C_RESET}"),
-                            LineType::Status,
-                        );
-                    }
                 }
             }
             _ => {}
@@ -298,7 +279,11 @@ impl Tui {
         Ok(KeyAction::Continue)
     }
 
-    pub(super) fn update_suggestions_with_client(&mut self, file_index: &FileIndex, client: &AcpClient) {
+    pub(super) fn update_suggestions_with_client(
+        &mut self,
+        file_index: &FileIndex,
+        client: &AcpClient,
+    ) {
         let content = self.input.content().to_string();
         self.suggestions.clear();
         self.selected_suggestion = None;
@@ -323,12 +308,16 @@ impl Tui {
                             crate::types::SlashCommandSource::Agent => "agent",
                             crate::types::SlashCommandSource::Extension => "ext",
                         };
-                        (src, rank, Suggestion {
-                            label: format!("/{}", cmd.name),
-                            value,
-                            description: cmd.description.clone(),
-                            source,
-                        })
+                        (
+                            src,
+                            rank,
+                            Suggestion {
+                                label: format!("/{}", cmd.name),
+                                value,
+                                description: cmd.description.clone(),
+                                source,
+                            },
+                        )
                     })
                 })
                 .collect();

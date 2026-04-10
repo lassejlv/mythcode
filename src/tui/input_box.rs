@@ -1,18 +1,24 @@
-use std::io::{self, Write};
-
-use crossterm::{cursor, execute, style};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::symbols::border;
 use ratatui::widgets::{Block, Borders, Padding, Widget};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+use crate::terminal_ui::CursorShape;
 
 pub struct InputBox {
     content: String,
     cursor_byte: usize,
-    cursor_col: usize,
     input_history: Vec<String>,
     history_index: Option<usize>,
+}
+
+pub struct InputRender {
+    pub lines: Vec<String>,
+    pub cursor_x: u16,
+    pub cursor_y: u16,
+    pub cursor_shape: CursorShape,
 }
 
 impl InputBox {
@@ -20,7 +26,6 @@ impl InputBox {
         Self {
             content: String::new(),
             cursor_byte: 0,
-            cursor_col: 0,
             input_history: Vec::new(),
             history_index: None,
         }
@@ -33,7 +38,6 @@ impl InputBox {
     pub fn take_content(&mut self) -> String {
         let text = std::mem::take(&mut self.content);
         self.cursor_byte = 0;
-        self.cursor_col = 0;
         self.history_index = None;
         if !text.trim().is_empty() {
             self.input_history.push(text.clone());
@@ -44,46 +48,35 @@ impl InputBox {
     pub fn clear(&mut self) {
         self.content.clear();
         self.cursor_byte = 0;
-        self.cursor_col = 0;
         self.history_index = None;
     }
 
     pub fn set_content(&mut self, s: &str) {
         self.content = s.to_string();
         self.cursor_byte = self.content.len();
-        self.cursor_col = self.content.chars().count();
     }
 
     pub fn insert_char(&mut self, ch: char) {
         self.content.insert(self.cursor_byte, ch);
         self.cursor_byte += ch.len_utf8();
-        self.cursor_col += 1;
     }
 
     pub fn insert_newline(&mut self) {
         self.content.insert(self.cursor_byte, '\n');
         self.cursor_byte += 1;
-        self.cursor_col = 0;
     }
 
-    /// Number of lines in the content (1 for empty or single-line).
     pub fn line_count(&self) -> u16 {
         (self.content.matches('\n').count() + 1).min(6) as u16
     }
-
 
     pub fn delete_char_before(&mut self) {
         if self.cursor_byte == 0 {
             return;
         }
-        let prev = self.content[..self.cursor_byte]
-            .char_indices()
-            .next_back()
-            .map(|(i, _)| i)
-            .unwrap_or(0);
+        let prev = prev_boundary(&self.content, self.cursor_byte);
         self.content.remove(prev);
         self.cursor_byte = prev;
-        self.cursor_col = self.cursor_col.saturating_sub(1);
     }
 
     pub fn delete_char_after(&mut self) {
@@ -96,13 +89,7 @@ impl InputBox {
         if self.cursor_byte == 0 {
             return;
         }
-        let prev = self.content[..self.cursor_byte]
-            .char_indices()
-            .next_back()
-            .map(|(i, _)| i)
-            .unwrap_or(0);
-        self.cursor_byte = prev;
-        self.cursor_col = self.cursor_col.saturating_sub(1);
+        self.cursor_byte = prev_boundary(&self.content, self.cursor_byte);
     }
 
     pub fn move_right(&mut self) {
@@ -111,18 +98,17 @@ impl InputBox {
         }
         if let Some(ch) = self.content[self.cursor_byte..].chars().next() {
             self.cursor_byte += ch.len_utf8();
-            self.cursor_col += 1;
         }
     }
 
     pub fn move_home(&mut self) {
-        self.cursor_byte = 0;
-        self.cursor_col = 0;
+        let (line_start, _) = self.current_line_bounds();
+        self.cursor_byte = line_start;
     }
 
     pub fn move_end(&mut self) {
-        self.cursor_byte = self.content.len();
-        self.cursor_col = self.content.chars().count();
+        let (_, line_end) = self.current_line_bounds();
+        self.cursor_byte = line_end;
     }
 
     pub fn delete_word_before(&mut self) {
@@ -135,10 +121,8 @@ impl InputBox {
             .rfind(|c: char| c.is_whitespace())
             .map(|i| i + 1)
             .unwrap_or(0);
-        let removed_chars = self.content[new_end..self.cursor_byte].chars().count();
         self.content.drain(new_end..self.cursor_byte);
         self.cursor_byte = new_end;
-        self.cursor_col = self.cursor_col.saturating_sub(removed_chars);
     }
 
     pub fn history_prev(&mut self) {
@@ -167,35 +151,33 @@ impl InputBox {
         }
     }
 
-    pub fn render(
+    pub fn render_frame(
         &self,
-        row: u16,
         width: u16,
         height: u16,
         title: &str,
         is_active: bool,
-    ) -> io::Result<()> {
-        let area = Rect::new(1, row, width.saturating_sub(2), height);
+    ) -> InputRender {
+        let area = Rect::new(1, 0, width.saturating_sub(2), height);
         let mut buf = Buffer::empty(area);
 
         let border_color = if is_active {
-            Color::Indexed(240) // subtle gray
+            Color::Indexed(240)
         } else {
-            Color::Indexed(236) // darker gray
+            Color::Indexed(236)
         };
 
         let block = Block::default()
             .borders(Borders::ALL)
             .border_set(border::ROUNDED)
             .border_style(Style::default().fg(border_color))
-            .title(format!(" {} ", title))
+            .title(format!(" {title} "))
             .title_style(Style::default().fg(Color::Indexed(245)))
             .padding(Padding::horizontal(1));
 
         let inner = block.inner(area);
         block.render(area, &mut buf);
 
-        // Render "❯ " prompt on first line
         let prompt_col = inner.x;
         if inner.width > 2 {
             let cell = &mut buf[(prompt_col, inner.y)];
@@ -203,50 +185,55 @@ impl InputBox {
             cell.set_fg(Color::Indexed(75));
         }
 
-        // Render content lines
-        let text_start = prompt_col + 2; // "> " on first line
+        let text_start = prompt_col + 2;
         let text_width = inner.width.saturating_sub(2) as usize;
         let lines: Vec<&str> = self.content.split('\n').collect();
 
-        // Find which line the cursor is on
         let before_cursor = &self.content[..self.cursor_byte];
         let cursor_line_idx = before_cursor.matches('\n').count();
         let cursor_line_start = before_cursor.rfind('\n').map(|p| p + 1).unwrap_or(0);
-        let cursor_col_in_line = self.content[cursor_line_start..self.cursor_byte].chars().count();
+        let cursor_col_in_line = display_width(&self.content[cursor_line_start..self.cursor_byte]);
 
         for (line_idx, line) in lines.iter().enumerate() {
             let row_in_box = line_idx as u16;
             if row_in_box >= inner.height {
                 break;
             }
-            let y = inner.y + row_in_box;
-            // Continuation lines get "  " indent (same as "> ")
-            let x_start = if line_idx == 0 { text_start } else { prompt_col + 2 };
-            let w = if line_idx == 0 { text_width } else { inner.width.saturating_sub(2) as usize };
 
-            if w == 0 {
+            let y = inner.y + row_in_box;
+            let x_start = if line_idx == 0 {
+                text_start
+            } else {
+                prompt_col + 2
+            };
+            let viewport_width = if line_idx == 0 {
+                text_width
+            } else {
+                inner.width.saturating_sub(2) as usize
+            };
+
+            if viewport_width == 0 {
                 continue;
             }
 
-            let chars: Vec<char> = line.chars().collect();
-            // Scroll horizontally on the cursor line
-            let scroll = if line_idx == cursor_line_idx && cursor_col_in_line > w.saturating_sub(4) {
-                cursor_col_in_line.saturating_sub(w.saturating_sub(4))
+            let scroll = if line_idx == cursor_line_idx {
+                horizontal_scroll(cursor_col_in_line, viewport_width)
             } else {
                 0
             };
-            let end = (scroll + w).min(chars.len());
 
-            for (col_off, ci) in (scroll..end).enumerate() {
-                let x = x_start + col_off as u16;
-                if x < area.right() && y < area.bottom() {
-                    let cell = &mut buf[(x, y)];
-                    cell.set_char(chars[ci]);
-                    cell.set_fg(Color::Reset);
+            let visible = visible_slice(line, scroll, viewport_width);
+            let mut x = x_start;
+            for ch in visible.chars() {
+                if x >= area.right() || y >= area.bottom() {
+                    break;
                 }
+                let cell = &mut buf[(x, y)];
+                cell.set_char(ch);
+                cell.set_fg(Color::Reset);
+                x = x.saturating_add(ch.width().unwrap_or(1) as u16);
             }
 
-            // Show continuation marker on non-first lines
             if line_idx > 0 && inner.width > 2 {
                 let cell = &mut buf[(prompt_col, y)];
                 cell.set_char('·');
@@ -254,106 +241,192 @@ impl InputBox {
             }
         }
 
-        // Write buffer to terminal
-        let mut stdout = io::stdout();
-        for y in area.top()..area.bottom() {
-            // Clear entire line first to remove any leaked content
-            execute!(stdout, cursor::MoveTo(0, y))?;
-            write!(stdout, "\x1b[2K")?;
-            execute!(stdout, cursor::MoveTo(area.left(), y))?;
-            for x in area.left()..area.right() {
-                let cell = &buf[(x, y)];
-                let ct_fg = ratatui_to_crossterm_color(cell.fg);
-                let ct_bg = ratatui_to_crossterm_color(cell.bg);
-                execute!(
-                    stdout,
-                    style::SetForegroundColor(ct_fg),
-                    style::SetBackgroundColor(ct_bg),
-                    style::Print(cell.symbol()),
-                )?;
-            }
-            execute!(stdout, style::ResetColor)?;
-        }
-
-        // Show placeholder if empty
         if self.content.is_empty() {
-            execute!(stdout, cursor::MoveTo(text_start, inner.y))?;
-            write!(stdout, "\x1b[38;5;242mType a message...\x1b[0m")?;
+            let placeholder = "Type a message...";
+            let mut x = text_start;
+            for ch in placeholder.chars() {
+                if x >= area.right() {
+                    break;
+                }
+                let cell = &mut buf[(x, inner.y)];
+                cell.set_char(ch);
+                cell.set_fg(Color::Indexed(242));
+                x = x.saturating_add(ch.width().unwrap_or(1) as u16);
+            }
         }
 
-        // Position cursor
         let (cursor_x, cursor_y) = self.cursor_screen_pos(inner, text_start);
-        execute!(
-            stdout,
-            cursor::MoveTo(cursor_x, cursor_y),
-            cursor::Show,
-            cursor::SetCursorStyle::SteadyBlock,
-        )?;
+        let mut rendered_lines = Vec::with_capacity(height as usize);
+        for row in 0..height {
+            rendered_lines.push(buffer_row_to_ansi(&buf, area, row));
+        }
 
-        stdout.flush()
+        InputRender {
+            lines: rendered_lines,
+            cursor_x,
+            cursor_y,
+            cursor_shape: CursorShape::Block,
+        }
     }
 
-    /// Reposition the cursor into the input box without re-rendering.
-    pub fn reposition_cursor(&self, row: u16, width: u16, height: u16) -> io::Result<()> {
-        let area = Rect::new(1, row, width.saturating_sub(2), height);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_set(border::ROUNDED)
-            .padding(Padding::horizontal(1));
-        let inner = block.inner(area);
-        let text_start = inner.x + 2;
-
-        let (cursor_x, cursor_y) = self.cursor_screen_pos(inner, text_start);
-        let mut stdout = io::stdout();
-        execute!(
-            stdout,
-            cursor::MoveTo(cursor_x, cursor_y),
-            cursor::Show,
-            cursor::SetCursorStyle::SteadyBlock,
-        )?;
-        stdout.flush()
+    fn current_line_bounds(&self) -> (usize, usize) {
+        let before = &self.content[..self.cursor_byte];
+        let line_start = before.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+        let line_end = self.content[self.cursor_byte..]
+            .find('\n')
+            .map(|idx| self.cursor_byte + idx)
+            .unwrap_or(self.content.len());
+        (line_start, line_end)
     }
 
     fn cursor_screen_pos(&self, inner: Rect, text_start: u16) -> (u16, u16) {
         if self.content.is_empty() {
             return (text_start, inner.y);
         }
+
         let before = &self.content[..self.cursor_byte];
         let line_idx = before.matches('\n').count() as u16;
         let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
-        let col = self.content[line_start..self.cursor_byte].chars().count();
-        let w = inner.width.saturating_sub(2) as usize;
-        let scroll = if col > w.saturating_sub(4) {
-            col.saturating_sub(w.saturating_sub(4))
-        } else {
-            0
-        };
-        let x = text_start + (col - scroll) as u16;
+        let col = display_width(&self.content[line_start..self.cursor_byte]);
+        let viewport_width = inner.width.saturating_sub(2) as usize;
+        let scroll = horizontal_scroll(col, viewport_width);
+        let x = text_start + col.saturating_sub(scroll) as u16;
         let y = inner.y + line_idx.min(inner.height.saturating_sub(1));
         (x, y)
     }
 }
 
-fn ratatui_to_crossterm_color(color: ratatui::style::Color) -> crossterm::style::Color {
+fn prev_boundary(text: &str, idx: usize) -> usize {
+    text[..idx]
+        .char_indices()
+        .next_back()
+        .map(|(pos, _)| pos)
+        .unwrap_or(0)
+}
+
+fn display_width(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
+}
+
+fn horizontal_scroll(cursor_col: usize, viewport_width: usize) -> usize {
+    if viewport_width == 0 {
+        0
+    } else if cursor_col > viewport_width.saturating_sub(4) {
+        cursor_col.saturating_sub(viewport_width.saturating_sub(4))
+    } else {
+        0
+    }
+}
+
+fn visible_slice(text: &str, scroll_cols: usize, viewport_width: usize) -> String {
+    let mut skipped = 0usize;
+    let mut used = 0usize;
+    let mut out = String::new();
+
+    for ch in text.chars() {
+        let ch_width = ch.width().unwrap_or(1).max(1);
+        if skipped + ch_width <= scroll_cols {
+            skipped += ch_width;
+            continue;
+        }
+        if skipped < scroll_cols {
+            skipped += ch_width;
+            continue;
+        }
+        if used + ch_width > viewport_width {
+            break;
+        }
+
+        out.push(ch);
+        used += ch_width;
+    }
+
+    out
+}
+
+fn buffer_row_to_ansi(buf: &Buffer, area: Rect, row: u16) -> String {
+    let y = area.top() + row;
+    let mut out = String::from(" ");
+    let mut fg = Color::Reset;
+    let mut bg = Color::Reset;
+
+    for x in area.left()..area.right() {
+        let cell = &buf[(x, y)];
+        if cell.fg != fg {
+            out.push_str(&ansi_color(cell.fg, false));
+            fg = cell.fg;
+        }
+        if cell.bg != bg {
+            out.push_str(&ansi_color(cell.bg, true));
+            bg = cell.bg;
+        }
+        out.push_str(cell.symbol());
+    }
+
+    if fg != Color::Reset || bg != Color::Reset {
+        out.push_str("\x1b[0m");
+    }
+
+    out
+}
+
+fn ansi_color(color: Color, background: bool) -> String {
+    let prefix = if background { 48 } else { 38 };
     match color {
-        Color::Reset => crossterm::style::Color::Reset,
-        Color::Black => crossterm::style::Color::Black,
-        Color::Red => crossterm::style::Color::DarkRed,
-        Color::Green => crossterm::style::Color::DarkGreen,
-        Color::Yellow => crossterm::style::Color::DarkYellow,
-        Color::Blue => crossterm::style::Color::DarkBlue,
-        Color::Magenta => crossterm::style::Color::DarkMagenta,
-        Color::Cyan => crossterm::style::Color::DarkCyan,
-        Color::Gray => crossterm::style::Color::Grey,
-        Color::DarkGray => crossterm::style::Color::DarkGrey,
-        Color::LightRed => crossterm::style::Color::Red,
-        Color::LightGreen => crossterm::style::Color::Green,
-        Color::LightYellow => crossterm::style::Color::Yellow,
-        Color::LightBlue => crossterm::style::Color::Blue,
-        Color::LightMagenta => crossterm::style::Color::Magenta,
-        Color::LightCyan => crossterm::style::Color::Cyan,
-        Color::White => crossterm::style::Color::White,
-        Color::Rgb(r, g, b) => crossterm::style::Color::Rgb { r, g, b },
-        Color::Indexed(i) => crossterm::style::Color::AnsiValue(i),
+        Color::Reset => {
+            if background {
+                "\x1b[49m".to_string()
+            } else {
+                "\x1b[39m".to_string()
+            }
+        }
+        Color::Black => format!("\x1b[{prefix};5;0m"),
+        Color::Red => format!("\x1b[{prefix};5;1m"),
+        Color::Green => format!("\x1b[{prefix};5;2m"),
+        Color::Yellow => format!("\x1b[{prefix};5;3m"),
+        Color::Blue => format!("\x1b[{prefix};5;4m"),
+        Color::Magenta => format!("\x1b[{prefix};5;5m"),
+        Color::Cyan => format!("\x1b[{prefix};5;6m"),
+        Color::Gray => format!("\x1b[{prefix};5;7m"),
+        Color::DarkGray => format!("\x1b[{prefix};5;8m"),
+        Color::LightRed => format!("\x1b[{prefix};5;9m"),
+        Color::LightGreen => format!("\x1b[{prefix};5;10m"),
+        Color::LightYellow => format!("\x1b[{prefix};5;11m"),
+        Color::LightBlue => format!("\x1b[{prefix};5;12m"),
+        Color::LightMagenta => format!("\x1b[{prefix};5;13m"),
+        Color::LightCyan => format!("\x1b[{prefix};5;14m"),
+        Color::White => format!("\x1b[{prefix};5;15m"),
+        Color::Rgb(r, g, b) => format!("\x1b[{prefix};2;{r};{g};{b}m"),
+        Color::Indexed(i) => format!("\x1b[{prefix};5;{i}m"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{InputBox, display_width, visible_slice};
+
+    #[test]
+    fn home_and_end_stay_on_current_line() {
+        let mut input = InputBox::new();
+        input.set_content("abc\ndef");
+        input.move_left();
+        input.move_home();
+        assert_eq!(input.cursor_byte, 4);
+        input.move_end();
+        assert_eq!(input.cursor_byte, 7);
+    }
+
+    #[test]
+    fn cursor_position_uses_display_width_for_wide_chars() {
+        let mut input = InputBox::new();
+        input.set_content("ab界");
+        let render = input.render_frame(20, 3, "title", true);
+        assert_eq!(render.cursor_x, 9);
+        assert_eq!(display_width("ab界"), 4);
+    }
+
+    #[test]
+    fn visible_slice_scrolls_by_columns_not_chars() {
+        assert_eq!(visible_slice("ab界cd", 3, 3), "cd");
     }
 }

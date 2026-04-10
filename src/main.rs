@@ -5,6 +5,7 @@ mod input;
 mod process;
 mod session;
 mod spinner;
+mod terminal_ui;
 mod tui;
 mod types;
 

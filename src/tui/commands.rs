@@ -1,13 +1,12 @@
 /// Local slash-command handling.
-
 use anyhow::Result;
 
 use crate::acp_client::AcpClient;
 use crate::input::FileIndex;
 use crate::types::CommandAction;
 
+use super::history::{LineType, format_status, format_warning};
 use super::select::{SelectItem, SelectKind, SelectMode};
-use super::history::{format_status, format_warning, LineType};
 use super::{C_BOLD_CYAN, C_DIM, C_RESET, Tui};
 
 impl Tui {
@@ -32,6 +31,7 @@ impl Tui {
                 let cwd = client.session_snapshot().cwd().to_path_buf();
                 client.new_session(&cwd).await?;
                 *file_index = crate::cli::build_file_index(&cwd);
+                self.clear_queue();
                 self.history
                     .push(format_status("new session"), LineType::Status);
                 Ok(Some(CommandAction::Continue))
@@ -45,17 +45,26 @@ impl Tui {
                                 let time_hint = s.updated_at.as_deref().unwrap_or("");
                                 SelectItem {
                                     id: s.id,
-                                    display: format!("{} {}", s.title, C_DIM.to_string() + time_hint + C_RESET),
+                                    display: format!(
+                                        "{} {}",
+                                        s.title,
+                                        C_DIM.to_string() + time_hint + C_RESET
+                                    ),
                                 }
                             })
                             .collect();
-                        self.select_mode = Some(SelectMode::new("Resume session", items, SelectKind::Resume));
+                        self.select_mode =
+                            Some(SelectMode::new("Resume session", items, SelectKind::Resume));
                     }
                     Ok(_) => {
-                        self.history.push(format_status("no sessions found"), LineType::Status);
+                        self.history
+                            .push(format_status("no sessions found"), LineType::Status);
                     }
                     Err(e) => {
-                        self.history.push(format_warning(&format!("failed to list sessions: {e}")), LineType::Warning);
+                        self.history.push(
+                            format_warning(&format!("failed to list sessions: {e}")),
+                            LineType::Warning,
+                        );
                     }
                 }
                 Ok(Some(CommandAction::Continue))
@@ -79,7 +88,8 @@ impl Tui {
                             }
                         })
                         .collect();
-                    self.select_mode = Some(SelectMode::new("Select model", items, SelectKind::Model));
+                    self.select_mode =
+                        Some(SelectMode::new("Select model", items, SelectKind::Model));
                 }
                 Ok(Some(CommandAction::Continue))
             }
@@ -120,7 +130,10 @@ impl Tui {
                     for cmd in &agent_commands {
                         let name = format!("/{}", cmd.name);
                         self.history.push(
-                            format!("    \x1b[38;5;75m{name:<12}{C_RESET}{C_DIM}{}{C_RESET}", cmd.description),
+                            format!(
+                                "    \x1b[38;5;75m{name:<12}{C_RESET}{C_DIM}{}{C_RESET}",
+                                cmd.description
+                            ),
                             LineType::Status,
                         );
                     }
@@ -137,7 +150,10 @@ impl Tui {
                     for cmd in &self.extension_commands {
                         let name = format!("/{}", cmd.name);
                         self.history.push(
-                            format!("    \x1b[38;5;176m{name:<12}{C_RESET}{C_DIM}{}{C_RESET}", cmd.description),
+                            format!(
+                                "    \x1b[38;5;176m{name:<12}{C_RESET}{C_DIM}{}{C_RESET}",
+                                cmd.description
+                            ),
                             LineType::Status,
                         );
                     }
@@ -152,8 +168,9 @@ impl Tui {
                 self.history.push(String::new(), LineType::Status);
                 for (key, desc) in [
                     ("enter", "send message"),
+                    ("enter (busy)", "queue current draft"),
                     ("shift+enter", "new line"),
-                    ("tab", "autocomplete / queue message"),
+                    ("tab", "autocomplete"),
                     ("shift+tab", "cycle modes"),
                     ("ctrl+o", "expand last tool output"),
                     ("ctrl+c", "cancel / exit"),
@@ -193,7 +210,10 @@ impl Tui {
                     for cmd in &self.extension_commands {
                         let name = format!("/{}", cmd.name);
                         self.history.push(
-                            format!("  \x1b[38;5;114m●{C_RESET} {name}  {C_DIM}{}{C_RESET}", cmd.description),
+                            format!(
+                                "  \x1b[38;5;114m●{C_RESET} {name}  {C_DIM}{}{C_RESET}",
+                                cmd.description
+                            ),
                             LineType::Status,
                         );
                     }

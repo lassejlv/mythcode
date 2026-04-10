@@ -3,6 +3,7 @@ use std::path::Path;
 use similar::{ChangeTag, TextDiff};
 
 use super::highlight::{self, Highlighter};
+use super::markdown::wrap_ansi;
 use crate::types::{DiffPreview, PlanEntryStatus, PlanView};
 
 use super::theme;
@@ -53,18 +54,20 @@ impl History {
         }
     }
 
-    pub fn visible_lines(&self, height: usize) -> &[RenderedLine] {
+    pub fn visible_lines(&self, height: usize, width: usize) -> Vec<RenderedLine> {
         if self.lines.is_empty() || height == 0 {
-            return &[];
+            return Vec::new();
         }
-        let total = self.lines.len();
+
+        let wrapped = self.wrapped_lines(width);
+        let total = wrapped.len();
         let end = total.saturating_sub(self.scroll_offset);
         let start = end.saturating_sub(height);
-        &self.lines[start..end]
+        wrapped[start..end].to_vec()
     }
 
-    pub fn scroll_up(&mut self, amount: usize) {
-        let max = self.lines.len().saturating_sub(3);
+    pub fn scroll_up(&mut self, amount: usize, width: usize) {
+        let max = self.wrapped_lines(width).len().saturating_sub(1);
         self.scroll_offset = (self.scroll_offset + amount).min(max);
     }
 
@@ -81,6 +84,39 @@ impl History {
         self.lines.clear();
         self.scroll_offset = 0;
     }
+
+    fn wrapped_lines(&self, width: usize) -> Vec<RenderedLine> {
+        let mut wrapped = Vec::new();
+        for line in &self.lines {
+            let segments = if line.content.is_empty() {
+                vec![String::new()]
+            } else {
+                wrap_ansi(&line.content, width)
+            };
+
+            for content in segments {
+                wrapped.push(RenderedLine {
+                    content,
+                    line_type: line.line_type,
+                });
+            }
+        }
+        wrapped
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{History, LineType};
+
+    #[test]
+    fn scroll_uses_wrapped_height() {
+        let mut history = History::new();
+        history.push("0123456789".into(), LineType::Assistant);
+
+        history.scroll_up(1, 4);
+        assert_eq!(history.scroll_offset, 1);
+    }
 }
 
 pub fn format_user_message(message: &str) -> Vec<String> {
@@ -96,10 +132,7 @@ pub fn format_turn_separator(elapsed: &str) -> Vec<String> {
         vec![String::new()]
     } else {
         let t = theme::theme();
-        vec![
-            format!("  {}· {elapsed}{R}", t.dark),
-            String::new(),
-        ]
+        vec![format!("  {}· {elapsed}{R}", t.dark), String::new()]
     }
 }
 
@@ -169,7 +202,8 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
     };
 
     lines.push(format!(
-        "  {}●{R} \x1b[1m{display_title}\x1b[0m{lines_tag}", t.dot
+        "  {}●{R} \x1b[1m{display_title}\x1b[0m{lines_tag}",
+        t.dot
     ));
 
     // Drop the theme lock before syntax highlighting (it may take time)
@@ -195,15 +229,11 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
                 .and_then(|h| h.highlight_line(line))
                 .unwrap_or_else(|| format!("{dark}{line}{R}"));
             let connector = if is_last(i) { "└" } else { "├" };
-            lines.push(format!(
-                "    {dark}{connector}{R}  {colored}"
-            ));
+            lines.push(format!("    {dark}{connector}{R}  {colored}"));
         }
         if total_lines > shown {
             let remaining = total_lines - shown;
-            lines.push(format!(
-                "    {dark}└ … {remaining} more lines{R}"
-            ));
+            lines.push(format!("    {dark}└ … {remaining} more lines{R}"));
         }
     }
 
@@ -246,11 +276,7 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
     let text_diff = TextDiff::from_lines(old_text, &diff.new_text);
     let groups = text_diff.grouped_ops(3);
 
-    let ext = diff
-        .path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = diff.path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let mut hl = Highlighter::new(ext);
 
     let mut insertions = 0usize;
@@ -339,9 +365,7 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                             .as_mut()
                             .and_then(|h| h.highlight_line(change_trimmed))
                             .unwrap_or_else(|| format!("{dark}{change_trimmed}{R}"));
-                        format!(
-                            "    {dark}├{R} {line_no_c}{line_no}{R}   {highlighted}"
-                        )
+                        format!("    {dark}├{R} {line_no_c}{line_no}{R}   {highlighted}")
                     }
                 };
                 diff_lines.push(formatted);

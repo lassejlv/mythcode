@@ -10,27 +10,20 @@ mod render;
 mod select;
 pub mod theme;
 
-use std::io;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{
-    Event, KeyCode, KeyEventKind, KeyModifiers,
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
-};
-use crossterm::{cursor, execute, terminal};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::terminal;
 use tokio::sync::mpsc;
 
 use crate::acp_client::AcpClient;
 use crate::input::FileIndex;
+use crate::terminal_ui::{TerminalGuard, TerminalGuardOptions};
 use crate::types::{AppEvent, PermissionDecision, ShutdownSignal, ToolOutputView};
 
-use history::{
-    format_activity, format_status, format_user_message, History, LineType,
-};
+use history::{History, LineType, format_activity, format_user_message};
 use input_box::InputBox;
-use markdown::MarkdownParser;
 use permission::PendingPermission;
 use select::SelectMode;
 
@@ -59,27 +52,32 @@ const C_BOLD_CYAN: &str = "\x1b[1;38;5;75m";
 const C_DARK: &str = "\x1b[38;5;240m";
 const C_SPINNER: &str = "\x1b[38;5;75m";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TurnState {
+    Idle,
+    Thinking,
+    Responding,
+    ToolRunning,
+    AwaitingPermission,
+}
+
 pub struct Tui {
     history: History,
     input: InputBox,
-    md_parser: MarkdownParser,
     term_width: u16,
     term_height: u16,
     assistant_buffer: String,
     thinking_buffer: String,
-    assistant_open: bool,
-    thinking_open: bool,
     last_activity: Option<String>,
     activity_line_count: u16,
     pending_permission: Option<PendingPermission>,
+    suspended_turn_state: Option<TurnState>,
     select_mode: Option<SelectMode>,
     turn_count: u32,
     spinner_frame: usize,
     spinner_active: bool,
     turn_start: Option<Instant>,
-    tool_active: bool,
-    partial_line: Option<String>,
-    thinking_partial: Option<String>,
+    turn_state: TurnState,
     suggestions: Vec<Suggestion>,
     selected_suggestion: Option<usize>,
     printed_text: bool,
@@ -105,24 +103,20 @@ impl Tui {
         Self {
             history: History::new(),
             input: InputBox::new(),
-            md_parser: MarkdownParser::new(),
             term_width: w,
             term_height: h,
             assistant_buffer: String::new(),
             thinking_buffer: String::new(),
-            assistant_open: false,
-            thinking_open: false,
             last_activity: None,
             activity_line_count: 0,
             pending_permission: None,
+            suspended_turn_state: None,
             select_mode: None,
             turn_count: 0,
             spinner_frame: 0,
             spinner_active: false,
             turn_start: None,
-            tool_active: false,
-            partial_line: None,
-            thinking_partial: None,
+            turn_state: TurnState::Idle,
             suggestions: Vec::new(),
             selected_suggestion: None,
             printed_text: false,
@@ -164,70 +158,43 @@ impl Tui {
         self.current_model = model_name.clone();
 
         // Welcome
-        self.history.push(String::new(), LineType::Welcome);
         self.history.push(
             format!(
-                "  {C_BOLD_CYAN}mythcode{C_RESET} {C_DARK}v{}{C_RESET} {C_DARK}·{C_RESET} \x1b[1m{}\x1b[0m",
-                env!("CARGO_PKG_VERSION"),
+                "  {C_BOLD_CYAN}mythcode{C_RESET} {C_DARK}·{C_RESET} \x1b[1m{}\x1b[0m",
                 self.project_name
             ),
             LineType::Welcome,
         );
         if let Some(model) = &model_name {
             let short_model = shorten_model_name(model);
-            self.history
-                .push(format!("  {C_DIM}{short_model}{C_RESET}"), LineType::Welcome);
-        }
-        self.history.push(
-            format!("  {C_DARK}/help for commands · shift+tab to switch mode{C_RESET}"),
-            LineType::Welcome,
-        );
-        self.history.push(String::new(), LineType::Welcome);
-
-        // Terminal setup
-        terminal::enable_raw_mode()?;
-        execute!(
-            io::stdout(),
-            terminal::EnterAlternateScreen,
-            crossterm::event::EnableMouseCapture,
-            cursor::Show,
-        )?;
-
-        // Enable enhanced keyboard protocol (Kitty) so Shift+Enter is distinguishable.
-        // Gracefully ignored on terminals that don't support it.
-        let has_enhanced_keys = crossterm::terminal::supports_keyboard_enhancement()
-            .unwrap_or(false);
-        if has_enhanced_keys {
-            let _ = execute!(
-                io::stdout(),
-                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::REPORT_EVENT_TYPES)
+            self.history.push(
+                format!("  {C_DIM}{short_model} · /help · shift+tab{C_RESET}"),
+                LineType::Welcome,
+            );
+        } else {
+            self.history.push(
+                format!("  {C_DIM}/help · shift+tab{C_RESET}"),
+                LineType::Welcome,
             );
         }
 
-        let original_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            let _ = terminal::disable_raw_mode();
-            if has_enhanced_keys {
-                let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
-            }
-            let _ = execute!(
-                io::stdout(),
-                crossterm::event::DisableMouseCapture,
-                terminal::LeaveAlternateScreen,
-                cursor::SetCursorStyle::DefaultUserShape,
-            );
-            original_hook(info);
-        }));
+        let _terminal_guard = TerminalGuard::enter(TerminalGuardOptions {
+            alternate_screen: true,
+            mouse_capture: true,
+            enhanced_keys: true,
+        })?;
 
         let (term_tx, mut term_rx) = mpsc::unbounded_channel();
-        std::thread::spawn(move || loop {
-            match crossterm::event::read() {
-                Ok(event) => {
-                    if term_tx.send(event).is_err() {
-                        break;
+        std::thread::spawn(move || {
+            loop {
+                match crossterm::event::read() {
+                    Ok(event) => {
+                        if term_tx.send(event).is_err() {
+                            break;
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         });
 
@@ -239,64 +206,69 @@ impl Tui {
         self.redraw()?;
 
         let mut pending_exit = false;
-        let mut spinner_interval = tokio::time::interval(Duration::from_millis(crate::spinner::INTERVAL_MS));
+        let mut spinner_interval =
+            tokio::time::interval(Duration::from_millis(crate::spinner::INTERVAL_MS));
         spinner_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         'outer: loop {
             // === INPUT PHASE ===
-            let submitted_line = loop {
-                tokio::select! {
-                    Some(event) = term_rx.recv() => {
-                        match event {
-                            Event::Key(key) if key.kind == KeyEventKind::Press => {
-                                match self.handle_key(key, client, &mut pending_exit, file_index).await? {
-                                    KeyAction::Continue => {}
-                                    KeyAction::Exit => break 'outer,
-                                    KeyAction::Submit(line) => {
-                                        pending_exit = false;
-                                        self.suggestions.clear();
-                                        self.selected_suggestion = None;
-                                        break line;
+            let submitted_line = if let Some(queued) = self.take_queued_submission() {
+                queued
+            } else {
+                loop {
+                    tokio::select! {
+                        Some(event) = term_rx.recv() => {
+                            match event {
+                                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                                    match self.handle_key(key, client, &mut pending_exit, file_index).await? {
+                                        KeyAction::Continue => {}
+                                        KeyAction::Exit => break 'outer,
+                                        KeyAction::Submit(line) => {
+                                            pending_exit = false;
+                                            self.suggestions.clear();
+                                            self.selected_suggestion = None;
+                                            break line;
+                                        }
                                     }
                                 }
-                            }
-                            Event::Mouse(mouse) => {
-                                if let crossterm::event::MouseEventKind::ScrollUp = mouse.kind {
-                                    self.history.scroll_up(3);
-                                    self.redraw()?;
-                                } else if let crossterm::event::MouseEventKind::ScrollDown = mouse.kind {
-                                    self.history.scroll_down(3);
+                                Event::Mouse(mouse) => {
+                                    if let crossterm::event::MouseEventKind::ScrollUp = mouse.kind {
+                                        self.history.scroll_up(3, self.term_width as usize);
+                                        self.redraw()?;
+                                    } else if let crossterm::event::MouseEventKind::ScrollDown = mouse.kind {
+                                        self.history.scroll_down(3);
+                                        self.redraw()?;
+                                    }
+                                }
+                                Event::Resize(w, h) => {
+                                    self.term_width = w;
+                                    self.term_height = h;
                                     self.redraw()?;
                                 }
+                                _ => {}
                             }
-                            Event::Resize(w, h) => {
-                                self.term_width = w;
-                                self.term_height = h;
-                                self.redraw()?;
-                            }
-                            _ => {}
                         }
-                    }
-                    Some(app_event) = events.recv() => {
-                        // Refresh extension commands when new events arrive
-                        if let Some(host) = ext_host.as_ref() {
-                            self.extension_commands = host.commands().await;
-                        }
-                        self.dispatch_app_event(app_event);
-                        self.redraw()?;
-                    }
-                    signal = signals.recv() => {
-                        match signal {
-                            ShutdownSignal::Sigint => {
-                                if pending_exit { break 'outer; }
-                                self.history.push(
-                                    format!("  {C_DIM}press ctrl+c again to exit{C_RESET}"),
-                                    LineType::Status,
-                                );
-                                pending_exit = true;
-                                self.redraw()?;
+                        Some(app_event) = events.recv() => {
+                            // Refresh extension commands when new events arrive
+                            if let Some(host) = ext_host.as_ref() {
+                                self.extension_commands = host.commands().await;
                             }
-                            ShutdownSignal::Sigterm => break 'outer,
+                            self.dispatch_app_event(app_event);
+                            self.redraw()?;
+                        }
+                        signal = signals.recv() => {
+                            match signal {
+                                ShutdownSignal::Sigint => {
+                                    if pending_exit { break 'outer; }
+                                    self.history.push(
+                                        format!("  {C_DIM}press ctrl+c again to exit{C_RESET}"),
+                                        LineType::Status,
+                                    );
+                                    pending_exit = true;
+                                    self.redraw()?;
+                                }
+                                ShutdownSignal::Sigterm => break 'outer,
+                            }
                         }
                     }
                 }
@@ -314,7 +286,11 @@ impl Tui {
                     .request("lifecycle/input", serde_json::json!({ "text": &trimmed }))
                     .await
                 {
-                    if result.get("handled").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    if result
+                        .get("handled")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
                         self.redraw()?;
                         continue;
                     }
@@ -327,8 +303,15 @@ impl Tui {
             // Check extension commands
             if trimmed.starts_with('/') {
                 if let Some(host) = ext_host.as_ref() {
-                    let cmd_name = trimmed.trim_start_matches('/').split_whitespace().next().unwrap_or("");
-                    let cmd_args = trimmed.trim_start_matches('/').trim_start_matches(cmd_name).trim();
+                    let cmd_name = trimmed
+                        .trim_start_matches('/')
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("");
+                    let cmd_args = trimmed
+                        .trim_start_matches('/')
+                        .trim_start_matches(cmd_name)
+                        .trim();
                     let ext_commands = host.commands().await;
                     if ext_commands.iter().any(|c| c.name == cmd_name) {
                         let _ = host.execute_command(cmd_name, cmd_args).await;
@@ -338,8 +321,9 @@ impl Tui {
                 }
             }
 
-            if let Some(action) =
-                self.handle_local_command(client, file_index, &trimmed).await?
+            if let Some(action) = self
+                .handle_local_command(client, file_index, &trimmed)
+                .await?
             {
                 match action {
                     crate::types::CommandAction::Continue => {
@@ -357,10 +341,17 @@ impl Tui {
             // Extension beforePrompt hook
             if let Some(host) = ext_host.as_ref() {
                 if let Ok(result) = host
-                    .request("lifecycle/beforePrompt", serde_json::json!({ "prompt": &trimmed }))
+                    .request(
+                        "lifecycle/beforePrompt",
+                        serde_json::json!({ "prompt": &trimmed }),
+                    )
                     .await
                 {
-                    if result.get("skip").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    if result
+                        .get("skip")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
                         self.redraw()?;
                         continue;
                     }
@@ -427,18 +418,11 @@ impl Tui {
                                         self.redraw()?;
                                     }
                                     KeyCode::Enter => {
-                                        let perm = self.pending_permission.take().unwrap();
-                                        let option = &perm.options[perm.selected];
-                                        let decision = PermissionDecision::Selected(option.option_id.clone());
-                                        let summary = option.name.to_lowercase();
-                                        let _ = perm.responder.send(decision);
-                                        self.history.push(format_status(&summary), LineType::Status);
+                                        self.accept_pending_permission();
                                         self.redraw()?;
                                     }
                                     KeyCode::Esc => {
-                                        let perm = self.pending_permission.take().unwrap();
-                                        let _ = perm.responder.send(PermissionDecision::Cancelled);
-                                        self.history.push(format_status("cancelled"), LineType::Status);
+                                        self.cancel_pending_permission();
                                         self.redraw()?;
                                     }
                                     _ => {}
@@ -464,7 +448,8 @@ impl Tui {
                                     }
                                 }
                                 KeyCode::PageUp => {
-                                    self.history.scroll_up(self.term_height as usize / 2);
+                                    self.history
+                                        .scroll_up(self.term_height as usize / 2, self.term_width as usize);
                                     self.redraw()?;
                                 }
                                 KeyCode::PageDown => {
@@ -488,16 +473,16 @@ impl Tui {
                                     self.input.insert_newline();
                                     self.redraw()?;
                                 }
+                                KeyCode::Enter => {
+                                    if self.queue_current_input() {
+                                        self.redraw()?;
+                                    }
+                                }
                                 KeyCode::Tab => {
-                                    // Queue message while agent is working
-                                    let text = self.input.take_content();
-                                    let trimmed = text.trim().to_string();
-                                    if !trimmed.is_empty() {
-                                        self.message_queue.push(trimmed.clone());
-                                        self.history.push(
-                                            format!("  {C_DIM}queued: {trimmed}{C_RESET}"),
-                                            LineType::Status,
-                                        );
+                                    self.update_suggestions_with_client(file_index, client);
+                                    if !self.suggestions.is_empty() {
+                                        self.selected_suggestion = Some(0);
+                                        self.input.set_content(&self.suggestions[0].value.clone());
                                         self.redraw()?;
                                     }
                                 }
@@ -505,7 +490,7 @@ impl Tui {
                             },
                             Event::Mouse(mouse) => {
                                 if let crossterm::event::MouseEventKind::ScrollUp = mouse.kind {
-                                    self.history.scroll_up(3);
+                                    self.history.scroll_up(3, self.term_width as usize);
                                     self.redraw()?;
                                 } else if let crossterm::event::MouseEventKind::ScrollDown = mouse.kind {
                                     self.history.scroll_down(3);
@@ -541,18 +526,34 @@ impl Tui {
             }
         }
 
-        // Restore terminal
-        let _ = terminal::disable_raw_mode();
-        if has_enhanced_keys {
-            let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
-        }
-        let _ = execute!(
-            io::stdout(),
-            terminal::LeaveAlternateScreen,
-            cursor::SetCursorStyle::DefaultUserShape,
-        );
-
         Ok(())
+    }
+
+    fn queue_current_input(&mut self) -> bool {
+        let text = self.input.take_content();
+        let trimmed = text.trim().to_string();
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        self.message_queue.push(trimmed.clone());
+        self.history.push(
+            format!("  {C_DIM}queued: {trimmed}{C_RESET}"),
+            LineType::Status,
+        );
+        true
+    }
+
+    fn take_queued_submission(&mut self) -> Option<String> {
+        if self.message_queue.is_empty() {
+            return None;
+        }
+
+        Some(std::mem::take(&mut self.message_queue).join("\n\n"))
+    }
+
+    fn clear_queue(&mut self) {
+        self.message_queue.clear();
     }
 }
 
@@ -564,5 +565,66 @@ fn shorten_model_name(model: &str) -> String {
         model.rsplit('/').next().unwrap_or(model).to_string()
     } else {
         model.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::oneshot;
+
+    use crate::types::{
+        AppEvent, PermissionOptionKindView, PermissionOptionView, PermissionRequestView,
+    };
+
+    use super::{Tui, TurnState};
+
+    #[test]
+    fn queued_messages_preserve_fifo_order() {
+        let mut tui = Tui::new();
+        tui.input.set_content("first");
+        assert!(tui.queue_current_input());
+        tui.input.set_content("second");
+        assert!(tui.queue_current_input());
+
+        assert_eq!(
+            tui.take_queued_submission().as_deref(),
+            Some("first\n\nsecond")
+        );
+        assert!(tui.take_queued_submission().is_none());
+    }
+
+    #[test]
+    fn spinner_status_survives_streaming_text() {
+        let mut tui = Tui::new();
+        tui.start_turn();
+        tui.handle_app_event(AppEvent::AssistantText("# Header\n- item".to_string()));
+
+        assert!(!tui.live_assistant_lines().is_empty());
+        assert!(!tui.status_lines().is_empty());
+        assert_eq!(tui.turn_state, TurnState::Responding);
+    }
+
+    #[test]
+    fn permission_restores_previous_turn_state() {
+        let mut tui = Tui::new();
+        tui.start_turn();
+        tui.turn_state = TurnState::ToolRunning;
+
+        let (tx, _rx) = oneshot::channel();
+        tui.dispatch_app_event(AppEvent::PermissionRequest(PermissionRequestView {
+            title: "Need approval".into(),
+            subtitle: None,
+            options: vec![PermissionOptionView {
+                option_id: "allow".into(),
+                name: "Allow once".into(),
+                kind: PermissionOptionKindView::AllowOnce,
+            }],
+            locations: Vec::new(),
+            responder: tx,
+        }));
+
+        assert_eq!(tui.turn_state, TurnState::AwaitingPermission);
+        tui.accept_pending_permission();
+        assert_eq!(tui.turn_state, TurnState::ToolRunning);
     }
 }
