@@ -320,6 +320,7 @@ impl Tui {
                         let source = match cmd.source {
                             crate::types::SlashCommandSource::Local => "local",
                             crate::types::SlashCommandSource::Agent => "agent",
+                            crate::types::SlashCommandSource::Extension => "ext",
                         };
                         (src, rank, Suggestion {
                             label: format!("/{}", cmd.name),

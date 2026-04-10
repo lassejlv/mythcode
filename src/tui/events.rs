@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::types::{AppEvent, PermissionDecision};
 
 use super::history::{
-    format_activity, format_diff, format_plan, format_tool_output,
+    format_activity, format_diff, format_plan, format_status, format_tool_output,
     format_turn_separator, format_user_message, format_warning, LineType,
 };
 use super::markdown::wrap_ansi;
@@ -121,6 +121,16 @@ impl Tui {
                 self.flush_assistant();
                 self.flush_thinking();
                 self.history.push(format_warning(&msg), LineType::Warning);
+            }
+            AppEvent::ExtensionMessage { text, level } => {
+                if level == "warning" {
+                    self.history.push(format_warning(&text), LineType::Warning);
+                } else {
+                    self.history.push(
+                        format_status(&text),
+                        LineType::Status,
+                    );
+                }
             }
             AppEvent::DebugProtocol(_) | AppEvent::ProcessStderr(_) => {}
             AppEvent::PermissionRequest(_) => {}

@@ -1,5 +1,6 @@
 mod acp_client;
 mod cli;
+mod extensions;
 mod input;
 mod process;
 mod session;

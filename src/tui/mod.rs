@@ -138,6 +138,7 @@ impl Tui {
         events: &mut mpsc::UnboundedReceiver<AppEvent>,
         signals: &mut super::cli::SignalState,
         file_index: &mut FileIndex,
+        ext_host: &mut Option<crate::extensions::ExtensionHost>,
     ) -> Result<()> {
         let session = client.session_snapshot();
         self.project_name = session
@@ -287,10 +288,40 @@ impl Tui {
                 }
             };
 
-            let trimmed = submitted_line.trim().to_string();
+            let mut trimmed = submitted_line.trim().to_string();
             if trimmed.is_empty() {
                 self.redraw()?;
                 continue;
+            }
+
+            // Extension input hook
+            if let Some(host) = ext_host.as_ref() {
+                if let Ok(result) = host
+                    .request("lifecycle/input", serde_json::json!({ "text": &trimmed }))
+                    .await
+                {
+                    if result.get("handled").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        self.redraw()?;
+                        continue;
+                    }
+                    if let Some(new_text) = result.get("text").and_then(|v| v.as_str()) {
+                        trimmed = new_text.to_string();
+                    }
+                }
+            }
+
+            // Check extension commands
+            if trimmed.starts_with('/') {
+                if let Some(host) = ext_host.as_ref() {
+                    let cmd_name = trimmed.trim_start_matches('/').split_whitespace().next().unwrap_or("");
+                    let cmd_args = trimmed.trim_start_matches('/').trim_start_matches(cmd_name).trim();
+                    let ext_commands = host.commands().await;
+                    if ext_commands.iter().any(|c| c.name == cmd_name) {
+                        let _ = host.execute_command(cmd_name, cmd_args).await;
+                        self.redraw()?;
+                        continue;
+                    }
+                }
             }
 
             if let Some(action) =
@@ -309,8 +340,27 @@ impl Tui {
             let user_lines = format_user_message(&trimmed);
             self.history.push_lines(user_lines, LineType::UserMessage);
 
+            // Extension beforePrompt hook
+            if let Some(host) = ext_host.as_ref() {
+                if let Ok(result) = host
+                    .request("lifecycle/beforePrompt", serde_json::json!({ "prompt": &trimmed }))
+                    .await
+                {
+                    if result.get("skip").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        self.redraw()?;
+                        continue;
+                    }
+                    if let Some(new_prompt) = result.get("prompt").and_then(|v| v.as_str()) {
+                        trimmed = new_prompt.to_string();
+                    }
+                }
+            }
+
             // === PROMPT PHASE ===
             self.start_turn();
+            if let Some(host) = ext_host.as_ref() {
+                host.notify("lifecycle/agentStart", serde_json::json!({}));
+            }
             let mut cancel_sent = false;
             self.redraw()?;
 
@@ -330,6 +380,11 @@ impl Tui {
                             }
                         }
                         self.finish_turn(&result);
+                        if let Some(host) = ext_host.as_ref() {
+                            host.notify("lifecycle/agentEnd", serde_json::json!({
+                                "stopReason": format!("{:?}", result.stop_reason)
+                            }));
+                        }
                         self.redraw()?;
                         break;
                     }

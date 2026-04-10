@@ -72,6 +72,14 @@ pub async fn run() -> Result<()> {
             let mut events = connected.events;
             let mut signals = SignalState::new()?;
 
+            // Discover and spawn extension host (optional)
+            let event_tx = connected.event_tx.clone();
+            let mut ext_host = crate::extensions::ExtensionHost::discover_and_spawn(
+                client.session_snapshot().cwd(),
+                event_tx,
+            )
+            .await;
+
             if let Some(prompt) = &config.prompt {
                 // One-shot mode: just print output directly
                 run_one_shot(&client, &mut events, &mut signals, prompt).await
@@ -80,8 +88,17 @@ pub async fn run() -> Result<()> {
                 let mut file_index = build_file_index(client.session_snapshot().cwd());
                 let mut tui = Tui::new();
                 let result = tui
-                    .run(&mut client, &mut events, &mut signals, &mut file_index)
+                    .run(
+                        &mut client,
+                        &mut events,
+                        &mut signals,
+                        &mut file_index,
+                        &mut ext_host,
+                    )
                     .await;
+                if let Some(ref mut host) = ext_host {
+                    host.shutdown().await;
+                }
                 client.shutdown().await;
                 result
             } else {

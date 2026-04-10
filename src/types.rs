@@ -45,6 +45,7 @@ pub enum AppEvent {
     PlanUpdate(PlanView),
     PermissionRequest(PermissionRequestView),
     Warning(String),
+    ExtensionMessage { text: String, level: String },
     DebugProtocol(#[allow(dead_code)] String),
     ProcessStderr(#[allow(dead_code)] String),
 }
@@ -67,6 +68,7 @@ impl SlashCommand {
 pub enum SlashCommandSource {
     Local,
     Agent,
+    Extension,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

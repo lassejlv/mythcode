@@ -27,6 +27,7 @@ pub struct AcpClient {
 pub struct ConnectedClient {
     pub client: AcpClient,
     pub events: mpsc::UnboundedReceiver<AppEvent>,
+    pub event_tx: mpsc::UnboundedSender<AppEvent>,
 }
 
 struct ClientHandler {
@@ -113,6 +114,7 @@ impl AcpClient {
         *initial_state.borrow_mut() = session;
 
         Ok(ConnectedClient {
+            event_tx: event_tx.clone(),
             client: Self {
                 conn,
                 process,

@@ -112,6 +112,7 @@ fn source_rank(command: &SlashCommand) -> u8 {
     match command.source {
         crate::types::SlashCommandSource::Local => 0,
         crate::types::SlashCommandSource::Agent => 1,
+        crate::types::SlashCommandSource::Extension => 2,
     }
 }
 

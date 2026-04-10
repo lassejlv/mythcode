@@ -771,6 +771,7 @@ dependencies = [
  "crossterm",
  "ignore",
  "ratatui",
+ "serde",
  "serde_json",
  "similar",
  "syntect",

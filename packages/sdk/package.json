@@ -1,0 +1,19 @@
+{
+  "name": "@mythcode/sdk",
+  "version": "0.1.0",
+  "private": false,
+  "description": "TypeScript SDK for building mythcode extensions",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lassejlv/mythcode"
+  },
+  "keywords": [
+    "mythcode",
+    "extension",
+    "acp",
+    "coding-agent"
+  ]
+}
