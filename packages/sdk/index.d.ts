@@ -1,20 +1,46 @@
 export interface MythcodeAPI {
+  // Lifecycle events
   on(event: "sessionStart", handler: (ctx: SessionContext) => void): Disposable;
+  on(event: "sessionEnd", handler: (ctx: Record<string, unknown>) => void): Disposable;
   on(event: "agentStart", handler: (ctx: Record<string, unknown>) => void): Disposable;
   on(event: "agentEnd", handler: (ctx: AgentEndContext) => void): Disposable;
   on(event: "toolResult", handler: (ctx: ToolResultContext) => void): Disposable;
+  on(event: "toolExecutionStart", handler: (ctx: ToolExecutionContext) => void): Disposable;
+  on(event: "toolExecutionEnd", handler: (ctx: ToolExecutionContext) => void): Disposable;
 
+  // Interception hooks
   onInput(handler: (ctx: InputContext) => InputResult | Promise<InputResult>): Disposable;
   onBeforePrompt(handler: (ctx: PromptContext) => PromptResult | Promise<PromptResult>): Disposable;
   onToolCall(handler: (ctx: ToolCallContext) => ToolCallResult | Promise<ToolCallResult>): Disposable;
 
+  // Registration
   registerCommand(def: CommandDefinition): Disposable;
   registerTool(def: ToolDefinition): Disposable;
 
+  // UI
   showMessage(text: string, level?: "info" | "warning"): void;
+  showWarning(text: string): void;
   setActivity(text: string): void;
+  clearScreen(): void;
 
+  // Session control
+  exit(): void;
+  newSession(): Promise<void>;
+  getCwd(): Promise<string>;
+  getModel(): Promise<string | null>;
+  setModel(modelId: string): Promise<void>;
+
+  // Messaging
+  sendMessage(text: string): void;
+  sendUserMessage(text: string): void;
+
+  // Shell execution
+  exec(command: string): Promise<ExecResult>;
+
+  // State persistence
   state: StateAPI;
+
+  // Metadata
   extension: { name: string; dir: string };
 }
 
@@ -33,6 +59,11 @@ export interface ToolResultContext {
   toolCallId: string;
   title: string;
   content: unknown[];
+}
+
+export interface ToolExecutionContext {
+  toolCallId: string;
+  title: string;
 }
 
 export interface InputContext {
@@ -73,6 +104,12 @@ export interface ToolDefinition {
 export interface ToolOutput {
   content: string;
   isError?: boolean;
+}
+
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
 }
 
 export interface StateAPI {

@@ -254,6 +254,7 @@ async fn spawn_host(
     let commands_clone = commands.clone();
     let event_tx_clone = event_tx.clone();
     let ready_tx_clone = ready_tx.clone();
+    let reply_tx = stdin_tx.clone();
     tokio::task::spawn_local(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
@@ -272,14 +273,23 @@ async fn spawn_host(
                 }
             }
 
+            let reply_id = msg.id;
+            let reply = |result: Value| {
+                if let Some(id) = reply_id {
+                    let resp = serde_json::json!({"jsonrpc":"2.0","id":id,"result":result});
+                    let _ = reply_tx.send(resp.to_string());
+                }
+            };
+
             // Incoming notification/request from host
             let method = msg.method.as_deref().unwrap_or("");
+            let params = msg.params.as_ref();
             match method {
                 "register/command" => {
-                    if let Some(params) = &msg.params {
-                        let name = params["name"].as_str().unwrap_or("").to_string();
-                        let desc = params["description"].as_str().unwrap_or("").to_string();
-                        let hint = params["hint"].as_str().map(|s| s.to_string());
+                    if let Some(p) = params {
+                        let name = p["name"].as_str().unwrap_or("").to_string();
+                        let desc = p["description"].as_str().unwrap_or("").to_string();
+                        let hint = p["hint"].as_str().map(|s| s.to_string());
                         commands_clone.lock().await.push(SlashCommand {
                             name,
                             description: desc,
@@ -287,28 +297,87 @@ async fn spawn_host(
                             source: SlashCommandSource::Extension,
                         });
                     }
-                    // Ack the registration
-                    if let Some(id) = msg.id {
-                        let ack = serde_json::json!({"jsonrpc":"2.0","id":id,"result":true});
-                        // We don't have stdin_tx here, so we skip the ack for now
-                        let _ = ack; // TODO: send ack back
-                    }
+                    reply(Value::Bool(true));
+                }
+                "register/tool" => {
+                    reply(Value::Bool(true));
                 }
                 "action/showMessage" => {
-                    if let Some(params) = &msg.params {
-                        let text = params["text"].as_str().unwrap_or("").to_string();
-                        let level = params["level"]
-                            .as_str()
-                            .unwrap_or("info")
-                            .to_string();
+                    if let Some(p) = params {
+                        let text = p["text"].as_str().unwrap_or("").to_string();
+                        let level = p["level"].as_str().unwrap_or("info").to_string();
                         let _ = event_tx_clone.send(AppEvent::ExtensionMessage { text, level });
                     }
                 }
                 "action/setActivity" => {
-                    if let Some(params) = &msg.params {
-                        let text = params["text"].as_str().unwrap_or("").to_string();
+                    if let Some(p) = params {
+                        let text = p["text"].as_str().unwrap_or("").to_string();
                         let _ = event_tx_clone.send(AppEvent::Activity(text));
                     }
+                }
+                "action/exit" => {
+                    let _ = event_tx_clone.send(AppEvent::ExtensionExit);
+                }
+                "action/newSession" => {
+                    let _ = event_tx_clone.send(AppEvent::ExtensionNewSession);
+                    reply(Value::Bool(true));
+                }
+                "action/getCwd" | "action/getModel" => {
+                    // These need state from the TUI — respond via events
+                    // For now return empty; will be wired up when TUI handles them
+                    reply(Value::Null);
+                }
+                "action/setModel" => {
+                    if let Some(p) = params {
+                        let model_id = p["modelId"].as_str().unwrap_or("").to_string();
+                        let _ = event_tx_clone.send(AppEvent::ExtensionSetModel(model_id));
+                    }
+                    reply(Value::Bool(true));
+                }
+                "action/sendMessage" => {
+                    if let Some(p) = params {
+                        let text = p["text"].as_str().unwrap_or("").to_string();
+                        let _ = event_tx_clone.send(AppEvent::ExtensionSendMessage(text));
+                    }
+                }
+                "action/sendUserMessage" => {
+                    if let Some(p) = params {
+                        let text = p["text"].as_str().unwrap_or("").to_string();
+                        let _ = event_tx_clone.send(AppEvent::ExtensionSendMessage(text));
+                    }
+                }
+                "action/exec" => {
+                    if let Some(p) = params {
+                        let command = p["command"].as_str().unwrap_or("").to_string();
+                        let reply_tx_exec = reply_tx.clone();
+                        let id = reply_id;
+                        tokio::task::spawn_local(async move {
+                            let output = tokio::process::Command::new("sh")
+                                .arg("-c")
+                                .arg(&command)
+                                .output()
+                                .await;
+                            let result = match output {
+                                Ok(out) => serde_json::json!({
+                                    "stdout": String::from_utf8_lossy(&out.stdout),
+                                    "stderr": String::from_utf8_lossy(&out.stderr),
+                                    "exitCode": out.status.code().unwrap_or(-1),
+                                }),
+                                Err(e) => serde_json::json!({
+                                    "stdout": "",
+                                    "stderr": e.to_string(),
+                                    "exitCode": -1,
+                                }),
+                            };
+                            if let Some(id) = id {
+                                let resp = serde_json::json!({"jsonrpc":"2.0","id":id,"result":result});
+                                let _ = reply_tx_exec.send(resp.to_string());
+                            }
+                        });
+                    }
+                }
+                "action/clearScreen" => {
+                    let _ = event_tx_clone.send(AppEvent::ExtensionClearScreen);
                 }
                 "host/ready" => {
                     if let Some(tx) = ready_tx_clone.lock().await.take() {
@@ -316,9 +385,9 @@ async fn spawn_host(
                     }
                 }
                 "host/error" => {
-                    if let Some(params) = &msg.params {
-                        let ext = params["extension"].as_str().unwrap_or("unknown");
-                        let err = params["error"].as_str().unwrap_or("unknown error");
+                    if let Some(p) = params {
+                        let ext = p["extension"].as_str().unwrap_or("unknown");
+                        let err = p["error"].as_str().unwrap_or("unknown error");
                         let _ = event_tx_clone.send(AppEvent::Warning(format!(
                             "extension {ext}: {err}"
                         )));

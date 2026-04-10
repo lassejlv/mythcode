@@ -132,6 +132,17 @@ impl Tui {
                     );
                 }
             }
+            AppEvent::ExtensionClearScreen => {
+                self.history.clear();
+            }
+            AppEvent::ExtensionSendMessage(text) => {
+                self.message_queue.push(text);
+            }
+            AppEvent::ExtensionExit
+            | AppEvent::ExtensionNewSession
+            | AppEvent::ExtensionSetModel(_) => {
+                // Handled in the main event loop, not here
+            }
             AppEvent::DebugProtocol(_) | AppEvent::ProcessStderr(_) => {}
             AppEvent::PermissionRequest(_) => {}
         }

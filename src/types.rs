@@ -46,6 +46,11 @@ pub enum AppEvent {
     PermissionRequest(PermissionRequestView),
     Warning(String),
     ExtensionMessage { text: String, level: String },
+    ExtensionExit,
+    ExtensionNewSession,
+    ExtensionSetModel(#[allow(dead_code)] String),
+    ExtensionSendMessage(String),
+    ExtensionClearScreen,
     DebugProtocol(#[allow(dead_code)] String),
     ProcessStderr(#[allow(dead_code)] String),
 }

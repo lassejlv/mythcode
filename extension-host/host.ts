@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join, basename } from "path";
 import { homedir } from "os";
+
 // Types inlined to avoid runtime dependency on @mythcode/sdk
 interface Disposable { dispose(): void }
 interface InputContext { text: string }
@@ -11,6 +12,8 @@ interface PromptContext { prompt: string }
 type PromptResult = { prompt: string } | { skip: true } | void
 interface ToolCallContext { toolCallId: string; title: string; kind: string; content: unknown[] }
 type ToolCallResult = { allow: true } | { allow: false; reason?: string } | void
+interface ToolExecutionContext { toolCallId: string; title: string }
+interface ExecResult { stdout: string; stderr: string; exitCode: number }
 interface CommandDefinition { name: string; description: string; hint?: string; execute: (args: string) => void | Promise<void> }
 interface StateAPI { get<T = unknown>(key: string): Promise<T | undefined>; set(key: string, value: unknown): Promise<void> }
 interface MythcodeAPI {
@@ -21,7 +24,17 @@ interface MythcodeAPI {
   registerCommand(def: CommandDefinition): Disposable
   registerTool(def: { name: string; description: string; inputSchema: Record<string, unknown>; execute: (input: Record<string, unknown>) => Promise<{ content: string; isError?: boolean }> }): Disposable
   showMessage(text: string, level?: "info" | "warning"): void
+  showWarning(text: string): void
   setActivity(text: string): void
+  clearScreen(): void
+  exit(): void
+  newSession(): Promise<void>
+  getCwd(): Promise<string>
+  getModel(): Promise<string | null>
+  setModel(modelId: string): Promise<void>
+  sendMessage(text: string): void
+  sendUserMessage(text: string): void
+  exec(command: string): Promise<ExecResult>
   state: StateAPI
   extension: { name: string; dir: string }
 }
@@ -94,6 +107,12 @@ interface ExtensionEntry {
 
 const extensions: ExtensionEntry[] = [];
 
+function makeDisposable(ext: ExtensionEntry, arr: any[], item: any): Disposable {
+  const d = { dispose: () => { const i = arr.indexOf(item); if (i >= 0) arr.splice(i, 1); } };
+  ext.disposables.push(d);
+  return d;
+}
+
 function createAPI(ext: ExtensionEntry): MythcodeAPI {
   const state = loadState(ext.name);
 
@@ -102,47 +121,75 @@ function createAPI(ext: ExtensionEntry): MythcodeAPI {
       const handlers = ext.lifecycleHandlers.get(event) ?? [];
       handlers.push(handler);
       ext.lifecycleHandlers.set(event, handlers);
-      const disposable = { dispose: () => { const i = handlers.indexOf(handler); if (i >= 0) handlers.splice(i, 1); } };
-      ext.disposables.push(disposable);
-      return disposable;
+      return makeDisposable(ext, handlers, handler);
     },
     onInput(handler) {
       ext.inputHandlers.push(handler);
-      const disposable = { dispose: () => { const i = ext.inputHandlers.indexOf(handler); if (i >= 0) ext.inputHandlers.splice(i, 1); } };
-      ext.disposables.push(disposable);
-      return disposable;
+      return makeDisposable(ext, ext.inputHandlers, handler);
     },
     onBeforePrompt(handler) {
       ext.promptHandlers.push(handler);
-      const disposable = { dispose: () => { const i = ext.promptHandlers.indexOf(handler); if (i >= 0) ext.promptHandlers.splice(i, 1); } };
-      ext.disposables.push(disposable);
-      return disposable;
+      return makeDisposable(ext, ext.promptHandlers, handler);
     },
     onToolCall(handler) {
       ext.toolCallHandlers.push(handler);
-      const disposable = { dispose: () => { const i = ext.toolCallHandlers.indexOf(handler); if (i >= 0) ext.toolCallHandlers.splice(i, 1); } };
-      ext.disposables.push(disposable);
-      return disposable;
+      return makeDisposable(ext, ext.toolCallHandlers, handler);
     },
     registerCommand(def) {
       ext.commands.set(def.name, def);
       sendRequest("register/command", { name: def.name, description: def.description, hint: def.hint });
-      const disposable = { dispose: () => { ext.commands.delete(def.name); } };
-      ext.disposables.push(disposable);
-      return disposable;
+      return makeDisposable(ext, [...ext.commands.values()], def);
     },
     registerTool(def) {
       sendRequest("register/tool", { name: def.name, description: def.description, inputSchema: def.inputSchema });
-      const disposable = { dispose: () => {} };
-      ext.disposables.push(disposable);
-      return disposable;
+      return { dispose: () => {} };
     },
+
+    // UI
     showMessage(text, level) {
       sendNotification("action/showMessage", { text, level: level ?? "info" });
+    },
+    showWarning(text) {
+      sendNotification("action/showMessage", { text, level: "warning" });
     },
     setActivity(text) {
       sendNotification("action/setActivity", { text });
     },
+    clearScreen() {
+      sendNotification("action/clearScreen");
+    },
+
+    // Session control
+    exit() {
+      sendNotification("action/exit");
+    },
+    async newSession() {
+      await sendRequest("action/newSession");
+    },
+    async getCwd() {
+      return await sendRequest("action/getCwd");
+    },
+    async getModel() {
+      return await sendRequest("action/getModel");
+    },
+    async setModel(modelId: string) {
+      await sendRequest("action/setModel", { modelId });
+    },
+
+    // Messaging
+    sendMessage(text) {
+      sendNotification("action/sendMessage", { text });
+    },
+    sendUserMessage(text) {
+      sendNotification("action/sendUserMessage", { text });
+    },
+
+    // Shell execution
+    async exec(command: string): Promise<ExecResult> {
+      return await sendRequest("action/exec", { command });
+    },
+
+    // State
     state: {
       async get<T = any>(key: string): Promise<T | undefined> {
         return state[key] as T | undefined;
@@ -152,6 +199,7 @@ function createAPI(ext: ExtensionEntry): MythcodeAPI {
         saveState(ext.name, state);
       },
     },
+
     extension: { name: ext.name, dir: ext.path },
   };
 }
@@ -192,6 +240,17 @@ async function loadExtensions() {
   });
 }
 
+function dispatchLifecycle(event: string, params: any) {
+  for (const ext of extensions) {
+    const handlers = ext.lifecycleHandlers.get(event) ?? [];
+    for (const handler of handlers) {
+      try { handler(params); } catch (err: any) {
+        sendNotification("host/error", { extension: ext.name, error: err.message });
+      }
+    }
+  }
+}
+
 // Handle incoming messages from Rust
 async function handleMessage(msg: any) {
   // Response to a request we sent
@@ -211,18 +270,13 @@ async function handleMessage(msg: any) {
 
   switch (method) {
     case "lifecycle/sessionStart":
+    case "lifecycle/sessionEnd":
     case "lifecycle/agentStart":
     case "lifecycle/agentEnd":
-    case "lifecycle/toolResult": {
-      const event = method.split("/")[1];
-      for (const ext of extensions) {
-        const handlers = ext.lifecycleHandlers.get(event) ?? [];
-        for (const handler of handlers) {
-          try { handler(params); } catch (err: any) {
-            sendNotification("host/error", { extension: ext.name, error: err.message });
-          }
-        }
-      }
+    case "lifecycle/toolResult":
+    case "lifecycle/toolExecutionStart":
+    case "lifecycle/toolExecutionEnd": {
+      dispatchLifecycle(method.split("/")[1], params);
       break;
     }
 
