@@ -1,4 +1,4 @@
-/// Interactive select mode for model picker, session picker, etc.
+//! Interactive select mode for model picker, session picker, etc.
 
 pub(super) struct SelectMode {
     pub title: String,

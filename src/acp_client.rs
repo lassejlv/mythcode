@@ -127,15 +127,12 @@ impl AcpClient {
         })
     }
 
-    pub async fn prompt(&self, prompt: &str) -> Result<PromptResult> {
+    pub async fn prompt(&self, content: Vec<acp::ContentBlock>) -> Result<PromptResult> {
         self.turn_cancelled.set(false);
         let session_id = self.state.borrow().id().clone();
         let response = self
             .conn
-            .prompt(acp::PromptRequest::new(
-                session_id,
-                vec![prompt.to_string().into()],
-            ))
+            .prompt(acp::PromptRequest::new(session_id, content))
             .await
             .context("ACP prompt failed")?;
 
@@ -482,11 +479,7 @@ impl acp::Client for ClientHandler {
 
     async fn session_notification(&self, args: acp::SessionNotification) -> acp::Result<()> {
         match args.update {
-            acp::SessionUpdate::UserMessageChunk(chunk) => {
-                if let Some(text) = content_text(&chunk.content) {
-                    let _ = self.event_tx.send(AppEvent::UserMessage(text));
-                }
-            }
+            acp::SessionUpdate::UserMessageChunk(_) => {}
             acp::SessionUpdate::AgentMessageChunk(chunk) => {
                 if let Some(text) = content_text(&chunk.content) {
                     let _ = self.event_tx.send(AppEvent::AssistantText(text));
@@ -641,10 +634,10 @@ fn emit_tool_output(
 ) {
     let mut text = String::new();
     for item in content {
-        if let acp::ToolCallContent::Content(c) = item {
-            if let acp::ContentBlock::Text(t) = &c.content {
-                text.push_str(&t.text);
-            }
+        if let acp::ToolCallContent::Content(c) = item
+            && let acp::ContentBlock::Text(t) = &c.content
+        {
+            text.push_str(&t.text);
         }
     }
     let trimmed = text.trim();

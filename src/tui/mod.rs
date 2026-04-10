@@ -35,6 +35,7 @@ pub struct Suggestion {
     /// Display label shown in the menu (e.g. "/help")
     pub label: String,
     /// Optional description shown alongside
+    #[allow(dead_code)]
     pub description: String,
     /// Source tag (e.g. "local", "agent", "file")
     #[allow(dead_code)]
@@ -42,7 +43,7 @@ pub struct Suggestion {
 }
 
 const INPUT_BOX_MIN_HEIGHT: u16 = 3;
-const MARGIN_TOP: u16 = 1;
+const MARGIN_TOP: u16 = 0;
 
 // Claude Code-inspired palette
 const C_RESET: &str = "\x1b[0m";
@@ -89,6 +90,14 @@ pub struct Tui {
     message_queue: Vec<String>,
     extension_commands: Vec<crate::types::SlashCommand>,
     status_items: std::collections::HashMap<String, String>,
+    image_counter: u32,
+    pending_images: Vec<PendingImage>,
+}
+
+pub struct PendingImage {
+    pub number: u32,
+    pub data: Vec<u8>,
+    pub mime_type: String,
 }
 
 enum KeyAction {
@@ -128,7 +137,32 @@ impl Tui {
             message_queue: Vec::new(),
             extension_commands: Vec::new(),
             status_items: std::collections::HashMap::new(),
+            image_counter: 0,
+            pending_images: Vec::new(),
         }
+    }
+
+    pub(super) fn try_paste_image(&mut self) {
+        let mut clipboard = match arboard::Clipboard::new() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let img = match clipboard.get_image() {
+            Ok(i) => i,
+            Err(_) => return,
+        };
+
+        let png_data = encode_rgba_to_png(
+            img.width as u32,
+            img.height as u32,
+            &img.bytes,
+        );
+        self.image_counter += 1;
+        self.pending_images.push(PendingImage {
+            number: self.image_counter,
+            data: png_data,
+            mime_type: "image/png".into(),
+        });
     }
 
     pub async fn run(
@@ -186,14 +220,9 @@ impl Tui {
 
         let (term_tx, mut term_rx) = mpsc::unbounded_channel();
         std::thread::spawn(move || {
-            loop {
-                match crossterm::event::read() {
-                    Ok(event) => {
-                        if term_tx.send(event).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
+            while let Ok(event) = crossterm::event::read() {
+                if term_tx.send(event).is_err() {
+                    break;
                 }
             }
         });
@@ -281,43 +310,42 @@ impl Tui {
             }
 
             // Extension input hook
-            if let Some(host) = ext_host.as_ref() {
-                if let Ok(result) = host
+            if let Some(host) = ext_host.as_ref()
+                && let Ok(result) = host
                     .request("lifecycle/input", serde_json::json!({ "text": &trimmed }))
                     .await
+            {
+                if result
+                    .get("handled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
                 {
-                    if result
-                        .get("handled")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                    {
-                        self.redraw()?;
-                        continue;
-                    }
-                    if let Some(new_text) = result.get("text").and_then(|v| v.as_str()) {
-                        trimmed = new_text.to_string();
-                    }
+                    self.redraw()?;
+                    continue;
+                }
+                if let Some(new_text) = result.get("text").and_then(|v| v.as_str()) {
+                    trimmed = new_text.to_string();
                 }
             }
 
             // Check extension commands
-            if trimmed.starts_with('/') {
-                if let Some(host) = ext_host.as_ref() {
-                    let cmd_name = trimmed
-                        .trim_start_matches('/')
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or("");
-                    let cmd_args = trimmed
-                        .trim_start_matches('/')
-                        .trim_start_matches(cmd_name)
-                        .trim();
-                    let ext_commands = host.commands().await;
-                    if ext_commands.iter().any(|c| c.name == cmd_name) {
-                        let _ = host.execute_command(cmd_name, cmd_args).await;
-                        self.redraw()?;
-                        continue;
-                    }
+            if trimmed.starts_with('/')
+                && let Some(host) = ext_host.as_ref()
+            {
+                let cmd_name = trimmed
+                    .trim_start_matches('/')
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("");
+                let cmd_args = trimmed
+                    .trim_start_matches('/')
+                    .trim_start_matches(cmd_name)
+                    .trim();
+                let ext_commands = host.commands().await;
+                if ext_commands.iter().any(|c| c.name == cmd_name) {
+                    let _ = host.execute_command(cmd_name, cmd_args).await;
+                    self.redraw()?;
+                    continue;
                 }
             }
 
@@ -335,29 +363,29 @@ impl Tui {
             }
 
             // Echo user message
-            let user_lines = format_user_message(&trimmed);
+            let image_numbers: Vec<u32> = self.pending_images.iter().map(|i| i.number).collect();
+            let user_lines = format_user_message(&trimmed, &image_numbers);
             self.history.push_lines(user_lines, LineType::UserMessage);
 
             // Extension beforePrompt hook
-            if let Some(host) = ext_host.as_ref() {
-                if let Ok(result) = host
+            if let Some(host) = ext_host.as_ref()
+                && let Ok(result) = host
                     .request(
                         "lifecycle/beforePrompt",
                         serde_json::json!({ "prompt": &trimmed }),
                     )
                     .await
+            {
+                if result
+                    .get("skip")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
                 {
-                    if result
-                        .get("skip")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                    {
-                        self.redraw()?;
-                        continue;
-                    }
-                    if let Some(new_prompt) = result.get("prompt").and_then(|v| v.as_str()) {
-                        trimmed = new_prompt.to_string();
-                    }
+                    self.redraw()?;
+                    continue;
+                }
+                if let Some(new_prompt) = result.get("prompt").and_then(|v| v.as_str()) {
+                    trimmed = new_prompt.to_string();
                 }
             }
 
@@ -369,7 +397,16 @@ impl Tui {
             let mut cancel_sent = false;
             self.redraw()?;
 
-            let prompt_future = client.prompt(&trimmed);
+            let mut content: Vec<agent_client_protocol::ContentBlock> =
+                vec![trimmed.to_string().into()];
+            for img in self.pending_images.drain(..) {
+                use base64::Engine;
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&img.data);
+                content.push(agent_client_protocol::ContentBlock::Image(
+                    agent_client_protocol::ImageContent::new(b64, img.mime_type),
+                ));
+            }
+            let prompt_future = client.prompt(content);
             tokio::pin!(prompt_future);
 
             loop {
@@ -406,15 +443,13 @@ impl Tui {
                                 // Handle permission dialog during prompt phase
                                 match key.code {
                                     KeyCode::Up => {
-                                        if let Some(ref mut perm) = self.pending_permission {
-                                            if perm.selected > 0 { perm.selected -= 1; }
-                                        }
+                                        if let Some(ref mut perm) = self.pending_permission
+                                            && perm.selected > 0 { perm.selected -= 1; }
                                         self.redraw()?;
                                     }
                                     KeyCode::Down => {
-                                        if let Some(ref mut perm) = self.pending_permission {
-                                            if perm.selected + 1 < perm.options.len() { perm.selected += 1; }
-                                        }
+                                        if let Some(ref mut perm) = self.pending_permission
+                                            && perm.selected + 1 < perm.options.len() { perm.selected += 1; }
                                         self.redraw()?;
                                     }
                                     KeyCode::Enter => {
@@ -566,6 +601,18 @@ fn shorten_model_name(model: &str) -> String {
     } else {
         model.to_string()
     }
+}
+
+fn encode_rgba_to_png(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut buf, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().expect("PNG header");
+        writer.write_image_data(rgba).expect("PNG data");
+    }
+    buf
 }
 
 #[cfg(test)]

@@ -4,26 +4,18 @@ use std::time::Instant;
 use crate::types::{AppEvent, PermissionDecision};
 
 use super::history::{
-    LineType, format_activity, format_diff, format_plan, format_status, format_tool_output,
-    format_turn_separator, format_user_message, format_warning,
+    format_activity, format_diff, format_plan, format_status, format_tool_output,
+    format_turn_separator, format_warning, LineType,
 };
 use super::markdown::{render_markdown, render_thinking};
 use super::permission::PendingPermission;
-use super::{C_DIM, C_RESET, Tui, TurnState};
+use super::{Tui, TurnState, C_DIM, C_RESET};
 
 impl Tui {
     // ── Event handling ──────────────────────────────────────────────
 
     pub(super) fn handle_app_event(&mut self, event: AppEvent) {
         match event {
-            AppEvent::UserMessage(text) => {
-                self.flush_assistant();
-                self.flush_thinking();
-                self.live_output_lines = 0;
-                self.last_activity = None;
-                let lines = format_user_message(text.trim());
-                self.history.push_lines(lines, LineType::UserMessage);
-            }
             AppEvent::AssistantText(text) => {
                 if text.trim().is_empty() && self.assistant_buffer.is_empty() {
                     return;

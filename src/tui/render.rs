@@ -11,14 +11,14 @@ use super::{
 impl Tui {
     pub(super) fn input_box_height(&self) -> u16 {
         let lines = self.input.line_count();
-        (lines + 2).max(INPUT_BOX_MIN_HEIGHT).min(8)
+        (lines + 2).clamp(INPUT_BOX_MIN_HEIGHT, 8)
     }
 
     pub(super) fn redraw(&mut self) -> io::Result<()> {
         let w = self.term_width;
         let h = self.term_height;
         let input_box_h = self.input_box_height();
-        let model_line_h: u16 = if self.current_model.is_some() { 1 } else { 0 };
+        let model_line_h: u16 = 0;
         let bottom_chrome = input_box_h + model_line_h;
         let mut frame = FrameBuffer::new(h);
 
@@ -41,7 +41,7 @@ impl Tui {
         let history_rows = visible.len() as u16;
 
         let content_rows = history_rows + extra_lines;
-        let gap = if content_rows > 0 { 1 } else { 0 };
+        let gap = 0;
         let input_row = (MARGIN_TOP + content_rows + gap).min(h.saturating_sub(bottom_chrome));
 
         for (row, line) in visible.iter().enumerate() {
@@ -76,6 +76,15 @@ impl Tui {
         } else {
             self.project_name.clone()
         };
+        if let Some(ref model) = self.current_model {
+            title.push_str(&format!(" · {}", super::shorten_model_name(model)));
+        }
+        for value in self.status_items.values() {
+            title.push_str(&format!(" · {value}"));
+        }
+        for img in &self.pending_images {
+            title.push_str(&format!(" [Image #{}]", img.number));
+        }
         if !self.message_queue.is_empty() {
             title.push_str(&format!(" ({} queued)", self.message_queue.len()));
         }
@@ -92,25 +101,6 @@ impl Tui {
             );
         }
 
-        let model_row = input_row + input_box_h;
-        if model_row < h {
-            let mut parts: Vec<String> = Vec::new();
-            if let Some(ref model) = self.current_model {
-                parts.push(super::shorten_model_name(model));
-            }
-            if self.current_mode.is_some() {
-                parts.push("shift+tab to switch mode".into());
-            }
-            for value in self.status_items.values() {
-                parts.push(value.clone());
-            }
-            if !parts.is_empty() {
-                frame.set_line(
-                    model_row,
-                    format!("   {C_DARK}{}{C_RESET}", parts.join("  ")),
-                );
-            }
-        }
 
         self.render_suggestions(&mut frame, input_row, bottom_chrome, h);
         self.render_select_mode(&mut frame, input_row, bottom_chrome, h);

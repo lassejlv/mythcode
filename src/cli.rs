@@ -45,9 +45,12 @@ pub async fn run() -> Result<()> {
         Some("claude") => AcpProvider::Claude,
         Some("pi") => AcpProvider::Pi,
         Some("gemini") => AcpProvider::Gemini,
+        Some("cursor") => AcpProvider::Cursor,
+        Some("amp") => AcpProvider::Amp,
+        Some("copilot") => AcpProvider::Copilot,
         Some(other) => {
             anyhow::bail!(
-                "unknown provider `{other}`. Use `opencode`, `codex`, `claude`, `pi`, or `gemini`."
+                "unknown provider `{other}`. Use `opencode`, `codex`, `claude`, `pi`, `gemini`, `cursor`, `amp`, or `copilot`."
             );
         }
         None if input::is_interactive_terminal() => match pick_provider()? {
@@ -121,7 +124,7 @@ async fn run_one_shot(
     prompt: &str,
 ) -> Result<()> {
     let mut stdout = io::stdout();
-    let prompt_future = client.prompt(prompt);
+    let prompt_future = client.prompt(vec![prompt.to_string().into()]);
     tokio::pin!(prompt_future);
 
     let mut cancel_sent = false;
@@ -193,7 +196,7 @@ async fn run_non_interactive(
         }
 
         // Simple non-interactive prompt execution
-        let prompt_future = client.prompt(line);
+        let prompt_future = client.prompt(vec![line.to_string().into()]);
         tokio::pin!(prompt_future);
         let mut cancel_sent = false;
 
@@ -291,6 +294,9 @@ async fn connect_with_loading(config: &AppConfig) -> Result<crate::acp_client::C
         AcpProvider::Claude => "Claude Code",
         AcpProvider::Pi => "Pi",
         AcpProvider::Gemini => "Gemini",
+        AcpProvider::Cursor => "Cursor",
+        AcpProvider::Amp => "Amp",
+        AcpProvider::Copilot => "Copilot",
     };
 
     let connect_messages: &[&str] = &["Connecting…", "Starting…", "Initializing…"];
@@ -314,7 +320,7 @@ async fn connect_with_loading(config: &AppConfig) -> Result<crate::acp_client::C
     ));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    let result = loop {
+    loop {
         tokio::select! {
             result = &mut connect_future => {
                 break result;
@@ -338,9 +344,7 @@ async fn connect_with_loading(config: &AppConfig) -> Result<crate::acp_client::C
                 screen.render(&mut stdout)?;
             }
         }
-    };
-
-    result
+    }
 }
 
 fn pick_provider() -> Result<Option<AcpProvider>> {
@@ -355,6 +359,9 @@ fn pick_provider() -> Result<Option<AcpProvider>> {
     const GREEN: &str = "\x1b[38;5;114m";
     const MAGENTA: &str = "\x1b[38;5;176m";
     const ORANGE: &str = "\x1b[38;5;209m";
+    const PURPLE: &str = "\x1b[38;5;147m";
+    const YELLOW: &str = "\x1b[38;5;185m";
+    const TEAL: &str = "\x1b[38;5;37m";
 
     struct ProviderEntry {
         provider: AcpProvider,
@@ -393,6 +400,24 @@ fn pick_provider() -> Result<Option<AcpProvider>> {
             name: "Gemini",
             color: CYAN,
             icon: "◆",
+        },
+        ProviderEntry {
+            provider: AcpProvider::Cursor,
+            name: "Cursor",
+            color: PURPLE,
+            icon: "▸",
+        },
+        ProviderEntry {
+            provider: AcpProvider::Amp,
+            name: "Amp",
+            color: YELLOW,
+            icon: "■",
+        },
+        ProviderEntry {
+            provider: AcpProvider::Copilot,
+            name: "GitHub Copilot",
+            color: TEAL,
+            icon: "✦",
         },
     ];
 
@@ -457,9 +482,7 @@ fn pick_provider() -> Result<Option<AcpProvider>> {
         if let Event::Key(key) = event::read()? {
             match key.code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    if selected > 0 {
-                        selected -= 1;
-                    }
+                    selected = selected.saturating_sub(1);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     if selected + 1 < providers.len() {
@@ -480,6 +503,15 @@ fn pick_provider() -> Result<Option<AcpProvider>> {
                 }
                 KeyCode::Char('4') if providers.len() >= 4 => {
                     return Ok(Some(providers[3].provider.clone()));
+                }
+                KeyCode::Char('5') if providers.len() >= 5 => {
+                    return Ok(Some(providers[4].provider.clone()));
+                }
+                KeyCode::Char('6') if providers.len() >= 6 => {
+                    return Ok(Some(providers[5].provider.clone()));
+                }
+                KeyCode::Char('7') if providers.len() >= 7 => {
+                    return Ok(Some(providers[6].provider.clone()));
                 }
                 KeyCode::Char('q') | KeyCode::Esc => {
                     return Ok(None);

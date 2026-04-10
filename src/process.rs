@@ -63,6 +63,21 @@ impl AcpProcess {
                 vec!["--acp".to_string()],
                 "gemini-acp",
             ),
+            AcpProvider::Cursor => (
+                "agent".to_string(),
+                vec!["acp".to_string()],
+                "cursor-acp",
+            ),
+            AcpProvider::Amp => (
+                "npx".to_string(),
+                vec!["-y".to_string(), "amp-acp".to_string()],
+                "amp-acp",
+            ),
+            AcpProvider::Copilot => (
+                "copilot".to_string(),
+                vec!["--acp".to_string(), "--stdio".to_string()],
+                "copilot-acp",
+            ),
         };
 
         let mut command = Command::new(&program);
@@ -158,6 +173,9 @@ impl AcpProcess {
             AcpProvider::Claude => "claude-acp",
             AcpProvider::Pi => "pi-acp",
             AcpProvider::Gemini => "gemini-acp",
+            AcpProvider::Cursor => "cursor-acp",
+            AcpProvider::Amp => "amp-acp",
+            AcpProvider::Copilot => "copilot-acp",
         };
         let tail = self.stderr_tail.lock().await;
         if tail.is_empty() {

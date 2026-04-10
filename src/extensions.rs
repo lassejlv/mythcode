@@ -150,7 +150,7 @@ fn discover_extensions(cwd: &Path) -> Vec<PathBuf> {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "ts" || e == "js") {
+                if path.extension().is_some_and(|e| e == "ts" || e == "js") {
                     paths.push(path);
                 } else if path.is_dir() {
                     let index = path.join("index.ts");
@@ -255,14 +255,14 @@ async fn spawn_host(
             };
 
             // Response to a request we sent
-            if let Some(id) = msg.id {
-                if msg.result.is_some() || msg.error.is_some() {
-                    let mut pending = pending_clone.lock().await;
-                    if let Some(tx) = pending.remove(&id) {
-                        let _ = tx.send(msg.result.unwrap_or(Value::Null));
-                    }
-                    continue;
+            if let Some(id) = msg.id
+                && (msg.result.is_some() || msg.error.is_some())
+            {
+                let mut pending = pending_clone.lock().await;
+                if let Some(tx) = pending.remove(&id) {
+                    let _ = tx.send(msg.result.unwrap_or(Value::Null));
                 }
+                continue;
             }
 
             let reply_id = msg.id;
@@ -379,10 +379,10 @@ async fn spawn_host(
                     }
                 }
                 "action/setTheme" => {
-                    if let Some(p) = params {
-                        if let Ok(overrides) = serde_json::from_value::<crate::tui::theme::ThemeOverride>(p.clone()) {
-                            crate::tui::theme::apply_override(&overrides);
-                        }
+                    if let Some(p) = params
+                        && let Ok(overrides) = serde_json::from_value::<crate::tui::theme::ThemeOverride>(p.clone())
+                    {
+                        crate::tui::theme::apply_override(&overrides);
                     }
                     reply(Value::Bool(true));
                 }

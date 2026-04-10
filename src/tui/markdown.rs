@@ -143,7 +143,7 @@ fn quote_prefix(depth: usize) -> String {
 }
 
 fn list_prefix(indent: usize, trimmed: &str) -> Option<(String, &str)> {
-    let list_indent = " ".repeat(4 + indent);
+    let list_indent = " ".repeat(3 + indent);
 
     if let Some(rest) = trimmed
         .strip_prefix("- ")
@@ -152,11 +152,11 @@ fn list_prefix(indent: usize, trimmed: &str) -> Option<(String, &str)> {
         return Some((format!("{list_indent}{C_BULLET}•{C_RESET}"), rest));
     }
 
-    if let Some(dot_pos) = trimmed.find(". ") {
-        if dot_pos <= 3 && trimmed[..dot_pos].chars().all(|c| c.is_ascii_digit()) {
-            let prefix = format!("{list_indent}{C_BULLET}{}{C_RESET}", &trimmed[..=dot_pos]);
-            return Some((prefix, &trimmed[dot_pos + 2..]));
-        }
+    if let Some(dot_pos) = trimmed.find(". ")
+        && dot_pos <= 3 && trimmed[..dot_pos].chars().all(|c| c.is_ascii_digit())
+    {
+        let prefix = format!("{list_indent}{C_BULLET}{}{C_RESET}", &trimmed[..=dot_pos]);
+        return Some((prefix, &trimmed[dot_pos + 2..]));
     }
 
     None

@@ -171,7 +171,6 @@ impl Tui {
 
         match key.code {
             KeyCode::BackTab => {
-                // Shift+Tab: cycle through modes (shown in input box title)
                 let session = client.session_snapshot();
                 let modes = session.available_modes();
                 if modes.len() > 1 {
@@ -180,6 +179,7 @@ impl Tui {
                     let next_idx = (current_idx + 1) % modes.len();
                     let next_id = modes[next_idx].id.clone();
                     client.set_mode(&next_id).await?;
+                    self.current_mode = Some(next_id);
                 }
                 self.redraw()?;
                 return Ok(KeyAction::Continue);
@@ -239,6 +239,9 @@ impl Tui {
                     }
                     self.history.push(String::new(), LineType::Status);
                 }
+            }
+            KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.try_paste_image();
             }
             KeyCode::Char(ch) => {
                 *pending_exit = false;

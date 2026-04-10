@@ -20,6 +20,9 @@ pub enum AcpProvider {
     Claude,
     Pi,
     Gemini,
+    Cursor,
+    Amp,
+    Copilot,
 }
 
 impl std::fmt::Display for AcpProvider {
@@ -30,6 +33,9 @@ impl std::fmt::Display for AcpProvider {
             Self::Claude => write!(f, "claude"),
             Self::Pi => write!(f, "pi"),
             Self::Gemini => write!(f, "gemini"),
+            Self::Cursor => write!(f, "cursor"),
+            Self::Amp => write!(f, "amp"),
+            Self::Copilot => write!(f, "copilot"),
         }
     }
 }
@@ -38,7 +44,6 @@ impl std::fmt::Display for AcpProvider {
 pub enum AppEvent {
     AssistantText(String),
     ThinkingText(String),
-    UserMessage(String),
     Activity(String),
     ModeChanged(String),
     SessionTitle(String),

@@ -1,6 +1,6 @@
-/// Spinner + shimmer for the "Thinking…" state.
-
+// Spinner + shimmer for the "Thinking…" state.
 // All frames are exactly 11 display columns wide — no text shift.
+#[allow(dead_code)]
 const FRAMES: &[&str] = &[
     "     ◆     ",
     "    ◆·◆    ",
@@ -26,8 +26,10 @@ const FRAMES: &[&str] = &[
 
 pub const INTERVAL_MS: u64 = 60;
 
+#[allow(dead_code)]
 const SPINNER_DIVISOR: usize = 3;
 
+#[allow(dead_code)]
 pub fn frame(tick: usize) -> &'static str {
     FRAMES[(tick / SPINNER_DIVISOR) % FRAMES.len()]
 }
@@ -82,7 +84,11 @@ pub fn tool_message_for(tool_hint: &str, elapsed_secs: u64) -> &'static str {
         "Editing…"
     } else if lower.contains("bash") || lower.contains("shell") || lower.contains("exec") {
         "Running…"
-    } else if lower.contains("grep") || lower.contains("search") || lower.contains("glob") || lower.contains("find") {
+    } else if lower.contains("grep")
+        || lower.contains("search")
+        || lower.contains("glob")
+        || lower.contains("find")
+    {
         "Searching…"
     } else if lower.contains("list") || lower.contains("ls") {
         "Listing…"
@@ -126,7 +132,7 @@ pub fn shimmer(tick: usize, text: &str) -> String {
 
     let mut result = String::with_capacity(len * 20);
     for (i, ch) in chars.iter().enumerate() {
-        let dist = if peak >= i { peak - i } else { i - peak };
+        let dist = peak.abs_diff(i);
         let color = match dist {
             0 => 159,
             1 => 117,
