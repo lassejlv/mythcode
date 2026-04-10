@@ -19,6 +19,7 @@ pub enum AcpProvider {
     Codex,
     Claude,
     Pi,
+    Gemini,
 }
 
 impl std::fmt::Display for AcpProvider {
@@ -28,6 +29,7 @@ impl std::fmt::Display for AcpProvider {
             Self::Codex => write!(f, "codex"),
             Self::Claude => write!(f, "claude"),
             Self::Pi => write!(f, "pi"),
+            Self::Gemini => write!(f, "gemini"),
         }
     }
 }

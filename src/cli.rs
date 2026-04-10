@@ -43,9 +43,10 @@ pub async fn run() -> Result<()> {
         Some("codex") => AcpProvider::Codex,
         Some("claude") => AcpProvider::Claude,
         Some("pi") => AcpProvider::Pi,
+        Some("gemini") => AcpProvider::Gemini,
         Some(other) => {
             anyhow::bail!(
-                "unknown provider `{other}`. Use `opencode`, `codex`, `claude`, or `pi`."
+                "unknown provider `{other}`. Use `opencode`, `codex`, `claude`, `pi`, or `gemini`."
             );
         }
         None if input::is_interactive_terminal() => pick_provider()?,
@@ -296,6 +297,7 @@ async fn connect_with_loading(config: &AppConfig) -> Result<crate::acp_client::C
         AcpProvider::Codex => "Codex",
         AcpProvider::Claude => "Claude Code",
         AcpProvider::Pi => "Pi",
+        AcpProvider::Gemini => "Gemini",
     };
 
     let connect_messages: &[&str] = &[
@@ -430,6 +432,14 @@ fn pick_provider() -> Result<AcpProvider> {
             description: "Pi coding assistant",
             color: MAGENTA,
             icon: "●",
+        },
+        ProviderEntry {
+            provider: AcpProvider::Gemini,
+            name: "Gemini",
+            package: "gemini --acp",
+            description: "Google Gemini CLI agent",
+            color: CYAN,
+            icon: "◆",
         },
     ];
 

@@ -58,6 +58,11 @@ impl AcpProcess {
                 vec!["-y".to_string(), "pi-acp".to_string()],
                 "pi-acp",
             ),
+            AcpProvider::Gemini => (
+                "gemini".to_string(),
+                vec!["--acp".to_string()],
+                "gemini-acp",
+            ),
         };
 
         let mut command = Command::new(&program);
@@ -152,6 +157,7 @@ impl AcpProcess {
             AcpProvider::Codex => "codex-acp",
             AcpProvider::Claude => "claude-acp",
             AcpProvider::Pi => "pi-acp",
+            AcpProvider::Gemini => "gemini-acp",
         };
         let tail = self.stderr_tail.lock().await;
         if tail.is_empty() {
