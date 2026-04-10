@@ -14,6 +14,13 @@ use super::{C_DIM, C_RESET, Tui, TurnState};
 impl Tui {
     // ── Event handling ──────────────────────────────────────────────
 
+    fn ensure_history_gap(&mut self, lines: usize) {
+        let trailing = self.history.trailing_blank_lines();
+        for _ in trailing..lines {
+            self.history.push(String::new(), LineType::Separator);
+        }
+    }
+
     pub(super) fn handle_app_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::AssistantText(text) => {
@@ -26,8 +33,10 @@ impl Tui {
                     self.history.push(String::new(), LineType::Separator);
                 }
                 self.assistant_buffer.push_str(&text);
-                self.turn_state = TurnState::Responding;
-                self.printed_text = true;
+                if !self.replaying_session {
+                    self.turn_state = TurnState::Responding;
+                    self.printed_text = true;
+                }
             }
             AppEvent::ThinkingText(text) => {
                 if text.trim().is_empty() && self.thinking_buffer.is_empty() {
@@ -35,29 +44,33 @@ impl Tui {
                 }
                 self.flush_assistant();
                 self.thinking_buffer.push_str(&text);
-                self.turn_state = TurnState::Thinking;
+                if !self.replaying_session {
+                    self.turn_state = TurnState::Thinking;
+                }
             }
             AppEvent::Activity(activity) => {
-                if self.last_activity.as_deref() == Some(&activity) {
+                if self.last_activity.as_ref() == Some(&activity) {
                     return;
                 }
                 self.flush_assistant();
                 self.flush_thinking();
                 self.live_output_lines = 0; // new tool, reset live output
                 self.activity_line_count = 0;
-                // Add spacing before tool activity (unless it's the first one)
                 let mut pushed = 0u16;
                 if self.last_activity.is_some() {
-                    self.history.push(String::new(), LineType::Separator);
-                    pushed += 1;
+                    self.ensure_history_gap(2);
                 }
-                self.history
-                    .push(format_activity(&activity), LineType::Activity);
+                self.history.push(
+                    format_activity(&activity.title, activity.status),
+                    LineType::Activity,
+                );
                 pushed += 1;
                 self.activity_line_count = pushed;
                 self.last_activity = Some(activity);
-                self.turn_state = TurnState::ToolRunning;
-                self.spinner_active = true;
+                if !self.replaying_session {
+                    self.turn_state = TurnState::ToolRunning;
+                    self.spinner_active = true;
+                }
             }
             AppEvent::ModeChanged(mode) => {
                 // Don't stop the spinner — mode changes often arrive at
@@ -82,7 +95,9 @@ impl Tui {
                 }
                 let lines = format_diff(&diff);
                 self.history.push_lines(lines, LineType::Diff);
-                self.turn_state = TurnState::ToolRunning;
+                if !self.replaying_session {
+                    self.turn_state = TurnState::ToolRunning;
+                }
             }
             AppEvent::ToolOutput(output) => {
                 // Replace previous live output lines
@@ -93,18 +108,31 @@ impl Tui {
                     self.history.pop_n(self.activity_line_count as usize);
                     self.activity_line_count = 0;
                 }
-                let lines = format_tool_output(&output.title, &output.content, output.total_lines);
+                let lines = format_tool_output(
+                    &output.title,
+                    output.status,
+                    &output.content,
+                    output.total_lines,
+                );
                 self.live_output_lines = lines.len();
                 self.history.push_lines(lines, LineType::Activity);
                 self.last_tool_outputs.push(output);
-                self.turn_state = TurnState::ToolRunning;
+                if !self.replaying_session {
+                    self.turn_state = TurnState::ToolRunning;
+                }
             }
             AppEvent::PlanUpdate(plan) => {
                 self.flush_assistant();
                 self.flush_thinking();
+                if !self.history.is_empty() {
+                    self.ensure_history_gap(1);
+                }
                 let lines = format_plan(&plan);
                 self.history.push_lines(lines, LineType::Activity);
-                self.turn_state = TurnState::ToolRunning;
+                self.ensure_history_gap(1);
+                if !self.replaying_session {
+                    self.turn_state = TurnState::ToolRunning;
+                }
             }
             AppEvent::Warning(msg) => {
                 self.flush_assistant();

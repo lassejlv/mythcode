@@ -10,7 +10,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::process::AcpProcess;
 use crate::session::SessionState;
 use crate::types::{
-    AppConfig, AppEvent, DiffPreview, PermissionDecision, PermissionOptionKindView,
+    ActivityView, AppConfig, AppEvent, DiffPreview, PermissionDecision, PermissionOptionKindView,
     PermissionOptionView, PermissionRequestView, PlanEntryStatus, PlanEntryView, PlanView,
     PromptResult, SessionModels, SlashCommand, SlashCommandSource, ToolOutputView,
 };
@@ -345,7 +345,10 @@ async fn set_model_inner(
                 .find(|candidate| candidate.id == model)
                 .map(|candidate| candidate.name.clone())
                 .unwrap_or_else(|| model.to_string());
-            let _ = event_tx.send(AppEvent::Activity(format!("model: {label}")));
+            let _ = event_tx.send(AppEvent::Activity(ActivityView {
+                title: format!("model: {label}"),
+                status: None,
+            }));
             Ok(())
         }
         Err(error) => Err(anyhow!(
@@ -490,9 +493,12 @@ impl acp::Client for ClientHandler {
                     .borrow_mut()
                     .insert(tool_call.tool_call_id.to_string(), tool_call.clone());
                 let title = tool_call_title(&tool_call);
-                let _ = self.event_tx.send(AppEvent::Activity(title.clone()));
+                let _ = self.event_tx.send(AppEvent::Activity(ActivityView {
+                    title: title.clone(),
+                    status: Some(tool_call.status),
+                }));
                 emit_diffs(&self.event_tx, extract_diff_previews(&tool_call.content));
-                emit_tool_output(&self.event_tx, &title, &tool_call.content);
+                emit_tool_output(&self.event_tx, &title, tool_call.status, &tool_call.content);
             }
             acp::SessionUpdate::ToolCallUpdate(update) => {
                 let mut tool_calls = self.tool_calls.borrow_mut();
@@ -507,20 +513,33 @@ impl acp::Client for ClientHandler {
                 } else {
                     drop(tool_calls);
                     if let Some(title) = update.fields.title.clone() {
-                        let _ = self.event_tx.send(AppEvent::Activity(title));
+                        let _ = self.event_tx.send(AppEvent::Activity(ActivityView {
+                            title,
+                            status: update.fields.status,
+                        }));
                     }
                     return Ok(());
                 };
                 drop(tool_calls);
 
-                if let Some(title) = update.fields.title {
-                    let _ = self.event_tx.send(AppEvent::Activity(title));
+                let title = tool_call_title(&next);
+                let previous_title = previous.as_ref().map(tool_call_title);
+                let title_changed = previous_title.as_deref() != Some(title.as_str());
+                let status_changed = previous.as_ref().map(|tool| tool.status) != Some(next.status);
+                let content_changed =
+                    previous.as_ref().map(|tool| &tool.content) != Some(&next.content);
+                let has_output = has_tool_output(&next.content);
+
+                if title_changed || (!has_output && status_changed) {
+                    let _ = self.event_tx.send(AppEvent::Activity(ActivityView {
+                        title: title.clone(),
+                        status: Some(next.status),
+                    }));
                 }
 
-                if previous.as_ref().map(|tool| &tool.content) != Some(&next.content) {
+                if content_changed || title_changed || status_changed {
                     emit_diffs(&self.event_tx, extract_diff_previews(&next.content));
-                    let title = next.title.clone();
-                    emit_tool_output(&self.event_tx, &title, &next.content);
+                    emit_tool_output(&self.event_tx, &title, next.status, &next.content);
                 }
             }
             acp::SessionUpdate::AvailableCommandsUpdate(update) => {
@@ -632,6 +651,7 @@ fn permission_kind(kind: &acp::PermissionOptionKind) -> PermissionOptionKindView
 fn emit_tool_output(
     event_tx: &mpsc::UnboundedSender<AppEvent>,
     title: &str,
+    status: acp::ToolCallStatus,
     content: &[acp::ToolCallContent],
 ) {
     let mut text = String::new();
@@ -673,9 +693,26 @@ fn emit_tool_output(
 
     let _ = event_tx.send(AppEvent::ToolOutput(ToolOutputView {
         title: title.to_string(),
+        status,
         content: clean_text,
         total_lines,
     }));
+}
+
+fn has_tool_output(content: &[acp::ToolCallContent]) -> bool {
+    content.iter().any(|item| {
+        if let acp::ToolCallContent::Content(c) = item
+            && let acp::ContentBlock::Text(t) = &c.content
+        {
+            return t
+                .text
+                .lines()
+                .map(str::trim)
+                .any(|line| !(line.is_empty() || (line.starts_with('<') && line.ends_with('>'))));
+        }
+
+        false
+    })
 }
 
 fn emit_diffs(event_tx: &mpsc::UnboundedSender<AppEvent>, diffs: Vec<DiffPreview>) {

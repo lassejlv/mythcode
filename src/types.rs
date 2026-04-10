@@ -44,7 +44,7 @@ impl std::fmt::Display for AcpProvider {
 pub enum AppEvent {
     AssistantText(String),
     ThinkingText(String),
-    Activity(String),
+    Activity(ActivityView),
     ModeChanged(String),
     SessionTitle(String),
     ToolDiff(DiffPreview),
@@ -61,6 +61,12 @@ pub enum AppEvent {
     ExtensionSetStatus { key: String, value: Option<String> },
     DebugProtocol(#[allow(dead_code)] String),
     ProcessStderr(#[allow(dead_code)] String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityView {
+    pub title: String,
+    pub status: Option<acp::ToolCallStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +119,7 @@ pub struct DiffPreview {
 #[derive(Debug, Clone)]
 pub struct ToolOutputView {
     pub title: String,
+    pub status: acp::ToolCallStatus,
     pub content: String,
     pub total_lines: usize,
 }

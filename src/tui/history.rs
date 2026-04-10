@@ -1,9 +1,11 @@
 use std::path::Path;
 
+use agent_client_protocol as acp;
 use similar::{ChangeTag, TextDiff};
 
 use super::highlight::{self, Highlighter};
 use super::markdown::wrap_ansi;
+use super::theme::Theme;
 use crate::types::{DiffPreview, PlanEntryStatus, PlanView};
 
 use super::theme;
@@ -85,6 +87,18 @@ impl History {
         self.scroll_offset = 0;
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+
+    pub fn trailing_blank_lines(&self) -> usize {
+        self.lines
+            .iter()
+            .rev()
+            .take_while(|line| line.content.is_empty())
+            .count()
+    }
+
     pub fn take_lines(&mut self) -> Vec<RenderedLine> {
         std::mem::take(&mut self.lines)
     }
@@ -111,7 +125,11 @@ impl History {
 
 #[cfg(test)]
 mod tests {
+    use agent_client_protocol as acp;
+
     use super::{History, LineType};
+    use crate::tui::history::format_activity;
+    use crate::tui::theme;
 
     #[test]
     fn scroll_uses_wrapped_height() {
@@ -120,6 +138,23 @@ mod tests {
 
         history.scroll_up(1, 4);
         assert_eq!(history.scroll_offset, 1);
+    }
+
+    #[test]
+    fn activity_dot_color_reflects_tool_status() {
+        let theme = theme::theme();
+        let green = theme.green.clone();
+        let red = theme.red.clone();
+        let dot = theme.dot.clone();
+        drop(theme);
+
+        let completed = format_activity("read src/main.rs", Some(acp::ToolCallStatus::Completed));
+        let failed = format_activity("read src/main.rs", Some(acp::ToolCallStatus::Failed));
+        let running = format_activity("read src/main.rs", Some(acp::ToolCallStatus::InProgress));
+
+        assert!(completed.contains(&format!("{green}●")));
+        assert!(failed.contains(&format!("{red}●")));
+        assert!(running.contains(&format!("{dot}●")));
     }
 }
 
@@ -176,8 +211,20 @@ pub fn format_turn_separator(elapsed: &str) -> Vec<String> {
     }
 }
 
-pub fn format_activity(activity: &str) -> String {
+fn tool_status_color(status: Option<acp::ToolCallStatus>, t: &Theme) -> &str {
+    match status {
+        Some(acp::ToolCallStatus::Completed) => t.green.as_str(),
+        Some(acp::ToolCallStatus::Failed) => t.red.as_str(),
+        Some(acp::ToolCallStatus::Pending | acp::ToolCallStatus::InProgress) | None => {
+            t.dot.as_str()
+        }
+        Some(_) => t.dot.as_str(),
+    }
+}
+
+pub fn format_activity(activity: &str, status: Option<acp::ToolCallStatus>) -> String {
     let t = theme::theme();
+    let dot = tool_status_color(status, &t).to_string();
     let short = shorten_activity(activity);
     let truncated = if short.chars().count() > 70 {
         let s: String = short.chars().take(67).collect();
@@ -185,7 +232,7 @@ pub fn format_activity(activity: &str) -> String {
     } else {
         short
     };
-    format!("  {}●{R} {}{truncated}{R}", t.dot, t.dark)
+    format!("  {dot}●{R} {}{truncated}{R}", t.dark)
 }
 
 pub fn format_warning(message: &str) -> String {
@@ -223,9 +270,15 @@ fn shorten_path(path: &str) -> String {
 
 const TOOL_OUTPUT_MAX_LINES: usize = 3;
 
-pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec<String> {
+pub fn format_tool_output(
+    title: &str,
+    status: acp::ToolCallStatus,
+    content: &str,
+    total_lines: usize,
+) -> Vec<String> {
     let t = theme::theme();
     let mut lines = Vec::new();
+    let dot = tool_status_color(Some(status), &t).to_string();
 
     let short_title = shorten_activity(title);
     let display_title = if short_title.chars().count() > 70 {
@@ -243,7 +296,7 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
 
     lines.push(format!(
         "  {}●{R} \x1b[1m{display_title}\x1b[0m{lines_tag}",
-        t.dot
+        dot
     ));
 
     // Drop the theme lock before syntax highlighting (it may take time)

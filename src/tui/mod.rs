@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 use crate::acp_client::AcpClient;
 use crate::input::FileIndex;
 use crate::terminal_ui::{TerminalGuard, TerminalGuardOptions};
-use crate::types::{AppEvent, PermissionDecision, ShutdownSignal, ToolOutputView};
+use crate::types::{ActivityView, AppEvent, PermissionDecision, ShutdownSignal, ToolOutputView};
 
 use history::{History, LineType, format_activity, format_user_message};
 use input_box::InputBox;
@@ -70,7 +70,7 @@ pub struct Tui {
     term_height: u16,
     assistant_buffer: String,
     thinking_buffer: String,
-    last_activity: Option<String>,
+    last_activity: Option<ActivityView>,
     activity_line_count: u16,
     pending_permission: Option<PendingPermission>,
     suspended_turn_state: Option<TurnState>,
@@ -184,16 +184,16 @@ impl Tui {
         self.history.clear();
     }
 
-    pub async fn drain_replay_events(&mut self, events: &mut mpsc::UnboundedReceiver<AppEvent>) {
+    fn start_session_replay(&mut self) {
         self.replaying_session = true;
-        while let Ok(event) = events.try_recv() {
-            self.dispatch_app_event(event);
-        }
-        // Yield once to allow any in-flight notifications to arrive
-        tokio::task::yield_now().await;
-        while let Ok(event) = events.try_recv() {
-            self.dispatch_app_event(event);
-        }
+        self.spinner_frame = 0;
+        self.turn_state = TurnState::Idle;
+        self.spinner_active = false;
+        self.last_activity = None;
+        self.activity_line_count = 0;
+    }
+
+    fn finish_session_replay(&mut self) {
         self.flush_assistant();
         self.flush_thinking();
         self.replaying_session = false;
@@ -201,6 +201,36 @@ impl Tui {
         self.spinner_active = false;
         self.last_activity = None;
         self.activity_line_count = 0;
+    }
+
+    pub async fn drain_replay_events(&mut self, events: &mut mpsc::UnboundedReceiver<AppEvent>) {
+        const INITIAL_IDLE_MS: u64 = 40;
+        const SETTLE_IDLE_MS: u64 = 120;
+
+        let mut saw_event = false;
+
+        loop {
+            while let Ok(event) = events.try_recv() {
+                saw_event = true;
+                self.dispatch_app_event(event);
+            }
+
+            let idle_ms = if saw_event {
+                SETTLE_IDLE_MS
+            } else {
+                INITIAL_IDLE_MS
+            };
+
+            match tokio::time::timeout(Duration::from_millis(idle_ms), events.recv()).await {
+                Ok(Some(event)) => {
+                    saw_event = true;
+                    self.dispatch_app_event(event);
+                }
+                Ok(None) | Err(_) => break,
+            }
+        }
+
+        self.finish_session_replay();
     }
 
     pub async fn run(
@@ -253,7 +283,7 @@ impl Tui {
 
         let _terminal_guard = TerminalGuard::enter(TerminalGuardOptions {
             alternate_screen: true,
-            mouse_capture: true,
+            mouse_capture: false,
             enhanced_keys: true,
         })?;
 
@@ -510,7 +540,10 @@ impl Tui {
                                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                     if !cancel_sent {
                                         client.cancel_current_turn().await?;
-                                        self.history.push(format_activity("cancelling"), LineType::Activity);
+                                        self.history.push(
+                                            format_activity("cancelling", None),
+                                            LineType::Activity,
+                                        );
                                         cancel_sent = true;
                                         self.redraw()?;
                                     } else {
@@ -520,7 +553,10 @@ impl Tui {
                                 KeyCode::Esc => {
                                     if !cancel_sent {
                                         client.cancel_current_turn().await?;
-                                        self.history.push(format_activity("cancelling"), LineType::Activity);
+                                        self.history.push(
+                                            format_activity("cancelling", None),
+                                            LineType::Activity,
+                                        );
                                         cancel_sent = true;
                                         self.redraw()?;
                                     }
@@ -591,7 +627,10 @@ impl Tui {
                         match signal {
                             ShutdownSignal::Sigint if !cancel_sent => {
                                 client.cancel_current_turn().await?;
-                                self.history.push(format_activity("cancelling"), LineType::Activity);
+                                self.history.push(
+                                    format_activity("cancelling", None),
+                                    LineType::Activity,
+                                );
                                 cancel_sent = true;
                                 self.redraw()?;
                             }

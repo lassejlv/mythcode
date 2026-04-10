@@ -34,14 +34,14 @@ impl Tui {
         };
         let status_lines = self.status_lines();
         let extra_lines = (live_thinking.len() + live_assistant.len() + status_lines.len()) as u16;
+        let gap = if status_lines.is_empty() { 0 } else { 1 };
 
-        let max_content = h.saturating_sub(MARGIN_TOP + bottom_chrome);
+        let max_content = h.saturating_sub(MARGIN_TOP + bottom_chrome + gap);
         let max_history = max_content.saturating_sub(extra_lines);
         let visible = self.history.visible_lines(max_history as usize, w as usize);
         let history_rows = visible.len() as u16;
 
         let content_rows = history_rows + extra_lines;
-        let gap = 0;
         let input_row = (MARGIN_TOP + content_rows + gap).min(h.saturating_sub(bottom_chrome));
 
         for (row, line) in visible.iter().enumerate() {
@@ -224,6 +224,10 @@ impl Tui {
             return lines;
         }
 
+        if self.replaying_session {
+            return vec![format!("  {C_SPINNER}loading session history…{C_RESET}")];
+        }
+
         if !self.spinner_active || self.turn_state == TurnState::Idle {
             return Vec::new();
         }
@@ -231,7 +235,10 @@ impl Tui {
         let elapsed_secs = self.turn_start.map(|t| t.elapsed().as_secs()).unwrap_or(0);
         let timer = crate::spinner::format_elapsed(elapsed_secs);
         let tool_hint = if self.turn_state == TurnState::ToolRunning {
-            self.last_activity.as_deref().unwrap_or("")
+            self.last_activity
+                .as_ref()
+                .map(|activity| activity.title.as_str())
+                .unwrap_or("")
         } else {
             ""
         };

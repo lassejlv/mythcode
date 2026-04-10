@@ -47,7 +47,12 @@ impl Tui {
                             SelectKind::Resume => {
                                 let id = item.id.clone();
                                 let name = item.display.clone();
-                                client.load_session(&id).await?;
+                                self.start_session_replay();
+                                self.redraw()?;
+                                if let Err(err) = client.load_session(&id).await {
+                                    self.finish_session_replay();
+                                    return Err(err);
+                                }
                                 self.history.clear();
                                 self.drain_replay_events(events).await;
                                 self.current_mode = client

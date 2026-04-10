@@ -302,7 +302,11 @@ async fn spawn_host(
                 "action/setActivity" => {
                     if let Some(p) = params {
                         let text = p["text"].as_str().unwrap_or("").to_string();
-                        let _ = event_tx_clone.send(AppEvent::Activity(text));
+                        let _ =
+                            event_tx_clone.send(AppEvent::Activity(crate::types::ActivityView {
+                                title: text,
+                                status: None,
+                            }));
                     }
                 }
                 "action/exit" => {
