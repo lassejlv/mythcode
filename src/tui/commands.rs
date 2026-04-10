@@ -99,6 +99,7 @@ impl Tui {
                     ("/new", "start a new session"),
                     ("/resume", "resume a previous session"),
                     ("/model", "select a model"),
+                    ("/extensions", "show loaded extensions"),
                     ("/exit", "exit mythcode"),
                 ] {
                     self.history.push(
@@ -120,6 +121,23 @@ impl Tui {
                         let name = format!("/{}", cmd.name);
                         self.history.push(
                             format!("    \x1b[38;5;75m{name:<12}{C_RESET}{C_DIM}{}{C_RESET}", cmd.description),
+                            LineType::Status,
+                        );
+                    }
+                }
+
+                // Extension commands
+                if !self.extension_commands.is_empty() {
+                    self.history.push(String::new(), LineType::Status);
+                    self.history.push(
+                        format!("  {C_BOLD_CYAN}Extension Commands{C_RESET}"),
+                        LineType::Status,
+                    );
+                    self.history.push(String::new(), LineType::Status);
+                    for cmd in &self.extension_commands {
+                        let name = format!("/{}", cmd.name);
+                        self.history.push(
+                            format!("    \x1b[38;5;176m{name:<12}{C_RESET}{C_DIM}{}{C_RESET}", cmd.description),
                             LineType::Status,
                         );
                     }
@@ -147,6 +165,38 @@ impl Tui {
                         format!("    {C_DIM}{key:<14}{C_RESET}{C_DIM}{desc}{C_RESET}"),
                         LineType::Status,
                     );
+                }
+
+                self.history.push(String::new(), LineType::Status);
+                Ok(Some(CommandAction::Continue))
+            }
+            "/extensions" | "/ext" => {
+                self.history.push(String::new(), LineType::Status);
+                self.history.push(
+                    format!("  {C_BOLD_CYAN}Extensions{C_RESET}"),
+                    LineType::Status,
+                );
+                self.history.push(String::new(), LineType::Status);
+
+                if self.extension_commands.is_empty() {
+                    self.history.push(
+                        format!("  {C_DIM}no extensions loaded{C_RESET}"),
+                        LineType::Status,
+                    );
+                    self.history.push(String::new(), LineType::Status);
+                    self.history.push(
+                        format!("  {C_DIM}add .ts files to ~/.mythcode/extensions/ or .mythcode/extensions/{C_RESET}"),
+                        LineType::Status,
+                    );
+                } else {
+                    // Group commands by showing them as registered
+                    for cmd in &self.extension_commands {
+                        let name = format!("/{}", cmd.name);
+                        self.history.push(
+                            format!("  \x1b[38;5;114m●{C_RESET} {name}  {C_DIM}{}{C_RESET}", cmd.description),
+                            LineType::Status,
+                        );
+                    }
                 }
 
                 self.history.push(String::new(), LineType::Status);

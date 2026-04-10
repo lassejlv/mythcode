@@ -264,6 +264,7 @@ pub fn local_commands() -> Vec<SlashCommand> {
         local_command("cwd", "print the current working directory", None),
         local_command("clear", "clear the terminal", None),
         local_command("resume", "resume a previous session", None),
+        local_command("extensions", "show loaded extensions", None),
         local_command("exit", "exit mythcode", None),
     ]
 }
