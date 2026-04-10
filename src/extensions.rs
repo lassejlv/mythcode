@@ -46,10 +46,24 @@ impl ExtensionHost {
             return None;
         }
 
-        match spawn_host(&paths, event_tx).await {
-            Ok(host) => Some(host),
+        let count = paths.len();
+        match spawn_host(&paths, event_tx.clone()).await {
+            Ok(host) => {
+                let names: Vec<_> = paths
+                    .iter()
+                    .filter_map(|p| p.file_name())
+                    .filter_map(|n| n.to_str())
+                    .collect();
+                let _ = event_tx.send(AppEvent::ExtensionMessage {
+                    text: format!("{count} extension(s) loaded: {}", names.join(", ")),
+                    level: "info".into(),
+                });
+                Some(host)
+            }
             Err(e) => {
-                eprintln!("extension host failed to start: {e}");
+                let _ = event_tx.send(AppEvent::Warning(format!(
+                    "extension host failed: {e}"
+                )));
                 None
             }
         }
@@ -231,10 +245,15 @@ async fn spawn_host(
     let commands: std::sync::Arc<tokio::sync::Mutex<Vec<SlashCommand>>> =
         std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
+    // Channel to signal when host is ready
+    let (ready_tx, ready_rx) = oneshot::channel::<()>();
+    let ready_tx = std::sync::Arc::new(tokio::sync::Mutex::new(Some(ready_tx)));
+
     // Stdout reader task — handles incoming JSON-RPC from the host
     let pending_clone = pending.clone();
     let commands_clone = commands.clone();
     let event_tx_clone = event_tx.clone();
+    let ready_tx_clone = ready_tx.clone();
     tokio::task::spawn_local(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
@@ -292,7 +311,9 @@ async fn spawn_host(
                     }
                 }
                 "host/ready" => {
-                    // Extensions loaded successfully
+                    if let Some(tx) = ready_tx_clone.lock().await.take() {
+                        let _ = tx.send(());
+                    }
                 }
                 "host/error" => {
                     if let Some(params) = &msg.params {
@@ -315,6 +336,9 @@ async fn spawn_host(
             let _ = event_tx.send(AppEvent::Warning(format!("ext: {line}")));
         }
     });
+
+    // Wait for host to be ready (with timeout)
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx).await;
 
     Ok(ExtensionHost {
         child,
