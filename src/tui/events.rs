@@ -28,10 +28,13 @@ impl Tui {
                 self.history.push_lines(lines, LineType::UserMessage);
             }
             AppEvent::AssistantText(text) => {
+                if text.trim().is_empty() && !self.assistant_open {
+                    // Don't kill the spinner for empty leading chunks
+                    return;
+                }
                 self.stop_spinner();
                 self.tool_active = false;
                 self.live_output_lines = 0;
-                // Add spacing when transitioning from thinking to assistant
                 if self.thinking_open {
                     self.flush_thinking();
                     self.history.push(String::new(), LineType::Separator);
@@ -42,6 +45,9 @@ impl Tui {
                 self.flush_complete_assistant_lines();
             }
             AppEvent::ThinkingText(text) => {
+                if text.trim().is_empty() && !self.thinking_open {
+                    return;
+                }
                 self.stop_spinner();
                 self.tool_active = false;
                 self.flush_assistant();
