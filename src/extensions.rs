@@ -169,24 +169,16 @@ fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-/// Resolve the host script path — bundled next to the binary or from SDK.
+/// The host script is embedded at compile time so it works in production builds.
+const HOST_SCRIPT: &str = include_str!("../extension-host/host.ts");
+
+/// Write the embedded host script to a temp file and return the path.
 fn host_script_path() -> Result<PathBuf> {
-    // Check next to the binary first
-    let exe = std::env::current_exe().context("cannot find executable path")?;
-    let alongside = exe.parent().unwrap_or(Path::new(".")).join("extension-host.ts");
-    if alongside.exists() {
-        return Ok(alongside);
-    }
-
-    // Check in the source tree (dev mode)
-    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("extension-host")
-        .join("host.ts");
-    if dev_path.exists() {
-        return Ok(dev_path);
-    }
-
-    anyhow::bail!("extension host script not found")
+    let dir = std::env::temp_dir().join("mythcode");
+    std::fs::create_dir_all(&dir).context("failed to create temp dir for extension host")?;
+    let path = dir.join("host.ts");
+    std::fs::write(&path, HOST_SCRIPT).context("failed to write extension host script")?;
+    Ok(path)
 }
 
 async fn spawn_host(
