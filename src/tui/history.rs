@@ -189,14 +189,13 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
         let is_last = |i: usize| -> bool { i == shown - 1 && total_lines <= shown };
 
         for (i, line) in preview_lines.iter().enumerate() {
-            let line_no = format!("{:>3}", i + 1);
             let colored = hl
                 .as_mut()
                 .and_then(|h| h.highlight_line(line))
                 .unwrap_or_else(|| format!("{C_DARK}{line}{C_RESET}"));
             let connector = if is_last(i) { "└" } else { "├" };
             lines.push(format!(
-                "    {C_DARK}{connector}{C_RESET} {C_LINE_NO}{line_no}{C_RESET}  {colored}"
+                "    {C_DARK}{connector}{C_RESET}  {colored}"
             ));
         }
         if total_lines > shown {

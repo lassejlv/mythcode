@@ -95,7 +95,13 @@ impl MarkdownParser {
         // Unordered list items
         if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
             let rendered = render_inline(rest);
-            return format!("  {C_BULLET}•{C_RESET} {rendered}");
+            return format!("    {C_BULLET}•{C_RESET} {rendered}");
+        }
+
+        // Nested list items (  - or   *)
+        if let Some(rest) = trimmed.strip_prefix("  - ").or_else(|| trimmed.strip_prefix("  * ")) {
+            let rendered = render_inline(rest);
+            return format!("      {C_BULLET}•{C_RESET} {rendered}");
         }
 
         // Ordered list items (1. 2. etc)
@@ -104,7 +110,7 @@ impl MarkdownParser {
                 let num = &trimmed[..dot_pos];
                 let rest = &trimmed[dot_pos + 2..];
                 let rendered = render_inline(rest);
-                return format!("  {C_BULLET}{num}.{C_RESET} {rendered}");
+                return format!("    {C_BULLET}{num}.{C_RESET} {rendered}");
             }
         }
 

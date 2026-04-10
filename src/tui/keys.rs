@@ -239,10 +239,9 @@ impl Tui {
                         LineType::Status,
                     );
                     for (i, hl_line) in highlighted.iter().enumerate() {
-                        let line_no = format!("{:>4}", i + 1);
                         let connector = if i == total - 1 { "└" } else { "├" };
                         self.history.push(
-                            format!("    {C_DIM}{connector}{C_RESET} {C_DIM}{line_no}{C_RESET}  {hl_line}"),
+                            format!("    {C_DIM}{connector}{C_RESET}  {hl_line}"),
                             LineType::Activity,
                         );
                     }
