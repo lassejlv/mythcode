@@ -5,18 +5,9 @@ use similar::{ChangeTag, TextDiff};
 use super::highlight::{self, Highlighter};
 use crate::types::{DiffPreview, PlanEntryStatus, PlanView};
 
-const C_RESET: &str = "\x1b[0m";
-const C_ACCENT: &str = "\x1b[38;5;75m";
-const C_GREEN: &str = "\x1b[38;5;114m";
-const C_RED: &str = "\x1b[38;5;174m";
-const C_YELLOW: &str = "\x1b[38;5;179m";
-const C_MAGENTA: &str = "\x1b[38;5;176m";
-const C_GRAY: &str = "\x1b[38;5;245m";
-const C_DARK: &str = "\x1b[38;5;240m";
-const C_LINE_NO: &str = "\x1b[38;5;240m";
-#[allow(dead_code)]
-const C_WHITE: &str = "\x1b[38;5;252m";
-const C_DOT: &str = "\x1b[38;5;179m"; // yellow dot like Claude Code
+use super::theme;
+
+const R: &str = "\x1b[0m";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineType {
@@ -93,9 +84,10 @@ impl History {
 }
 
 pub fn format_user_message(message: &str) -> Vec<String> {
+    let t = theme::theme();
     vec![
         String::new(),
-        format!("  {C_ACCENT}❯{C_RESET} \x1b[1m{message}\x1b[0m"),
+        format!("  {}❯{R} \x1b[1m{message}\x1b[0m", t.accent),
     ]
 }
 
@@ -103,14 +95,16 @@ pub fn format_turn_separator(elapsed: &str) -> Vec<String> {
     if elapsed.is_empty() {
         vec![String::new()]
     } else {
+        let t = theme::theme();
         vec![
-            format!("  {C_DARK}· {elapsed}{C_RESET}"),
+            format!("  {}· {elapsed}{R}", t.dark),
             String::new(),
         ]
     }
 }
 
 pub fn format_activity(activity: &str) -> String {
+    let t = theme::theme();
     let short = shorten_activity(activity);
     let truncated = if short.chars().count() > 70 {
         let s: String = short.chars().take(67).collect();
@@ -118,15 +112,17 @@ pub fn format_activity(activity: &str) -> String {
     } else {
         short
     };
-    format!("  {C_DOT}●{C_RESET} {C_DARK}{truncated}{C_RESET}")
+    format!("  {}●{R} {}{truncated}{R}", t.dot, t.dark)
 }
 
 pub fn format_warning(message: &str) -> String {
-    format!("  {C_YELLOW}⚠ {message}{C_RESET}")
+    let t = theme::theme();
+    format!("  {}⚠ {message}{R}", t.yellow)
 }
 
 pub fn format_status(message: &str) -> String {
-    format!("  {C_GRAY}{message}{C_RESET}")
+    let t = theme::theme();
+    format!("  {}{message}{R}", t.gray)
 }
 
 fn shorten_activity(activity: &str) -> String {
@@ -155,6 +151,7 @@ fn shorten_path(path: &str) -> String {
 const TOOL_OUTPUT_MAX_LINES: usize = 4;
 
 pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec<String> {
+    let t = theme::theme();
     let mut lines = Vec::new();
 
     let short_title = shorten_activity(title);
@@ -166,14 +163,18 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
     };
 
     let lines_tag = if total_lines > 0 {
-        format!("  {C_DARK}{total_lines} lines{C_RESET}")
+        format!("  {}{total_lines} lines{R}", t.dark)
     } else {
         String::new()
     };
 
     lines.push(format!(
-        "  {C_DOT}●{C_RESET} \x1b[1m{display_title}\x1b[0m{lines_tag}"
+        "  {}●{R} \x1b[1m{display_title}\x1b[0m{lines_tag}", t.dot
     ));
+
+    // Drop the theme lock before syntax highlighting (it may take time)
+    let dark = t.dark.clone();
+    drop(t);
 
     let preview_lines: Vec<&str> = content.lines().take(TOOL_OUTPUT_MAX_LINES).collect();
     let shown = preview_lines.len();
@@ -192,16 +193,16 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
             let colored = hl
                 .as_mut()
                 .and_then(|h| h.highlight_line(line))
-                .unwrap_or_else(|| format!("{C_DARK}{line}{C_RESET}"));
+                .unwrap_or_else(|| format!("{dark}{line}{R}"));
             let connector = if is_last(i) { "└" } else { "├" };
             lines.push(format!(
-                "    {C_DARK}{connector}{C_RESET}  {colored}"
+                "    {dark}{connector}{R}  {colored}"
             ));
         }
         if total_lines > shown {
             let remaining = total_lines - shown;
             lines.push(format!(
-                "    {C_DARK}└ … {remaining} more lines{C_RESET}"
+                "    {dark}└ … {remaining} more lines{R}"
             ));
         }
     }
@@ -210,22 +211,36 @@ pub fn format_tool_output(title: &str, content: &str, total_lines: usize) -> Vec
 }
 
 pub fn format_plan(plan: &PlanView) -> Vec<String> {
+    let t = theme::theme();
     let mut lines = Vec::new();
     lines.push(String::new());
-    lines.push(format!("  {C_ACCENT}Plan{C_RESET}"));
+    lines.push(format!("  {}Plan{R}", t.accent));
     for entry in &plan.entries {
         let (icon, color) = match entry.status {
-            PlanEntryStatus::Completed => ("✓", C_GREEN),
-            PlanEntryStatus::InProgress => ("●", C_ACCENT),
-            PlanEntryStatus::Pending => ("○", C_DARK),
+            PlanEntryStatus::Completed => ("✓", t.green.as_str()),
+            PlanEntryStatus::InProgress => ("●", t.accent.as_str()),
+            PlanEntryStatus::Pending => ("○", t.dark.as_str()),
         };
-        lines.push(format!("    {color}{icon}{C_RESET} {}{C_RESET}", entry.content));
+        lines.push(format!("    {color}{icon}{R} {}{R}", entry.content));
     }
     lines.push(String::new());
     lines
 }
 
 pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
+    let t = theme::theme();
+    let dot = t.dot.clone();
+    let dark = t.dark.clone();
+    let magenta = t.magenta.clone();
+    let line_no_c = t.line_no.clone();
+    let red = t.red.clone();
+    let green = t.green.clone();
+    let bg_add = t.diff_add_bg.clone();
+    let bg_del = t.diff_del_bg.clone();
+    drop(t);
+
+    const BG_RESET: &str = "\x1b[49m";
+
     let mut lines = Vec::new();
     let old_text = diff.old_text.as_deref().unwrap_or("");
     let text_diff = TextDiff::from_lines(old_text, &diff.new_text);
@@ -269,12 +284,10 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
         .map(|s| format!("{s}/"))
         .unwrap_or_default();
 
-    // Header: ● Edit src/main.rs
     lines.push(format!(
-        "  {C_DOT}●{C_RESET} \x1b[1m{verb}\x1b[0m({C_DARK}{parent_hint}{C_RESET}{C_MAGENTA}{filename}{C_RESET})"
+        "  {dot}●{R} \x1b[1m{verb}\x1b[0m({dark}{parent_hint}{R}{magenta}{filename}{R})"
     ));
 
-    // Stats line
     let stats_text = if deletions == 0 {
         format!("Added {insertions} lines")
     } else if insertions == 0 {
@@ -282,25 +295,18 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
     } else {
         format!("Added {insertions} lines, removed {deletions} lines")
     };
-    lines.push(format!(
-        "    {C_DARK}├{C_RESET} {C_DARK}{stats_text}{C_RESET}"
-    ));
+    lines.push(format!("    {dark}├{R} {dark}{stats_text}{R}"));
 
     if groups.is_empty() {
-        lines.push(format!("    {C_DARK}└ (no changes){C_RESET}"));
+        lines.push(format!("    {dark}└ (no changes){R}"));
         return lines;
     }
 
-    const BG_RED: &str = "\x1b[48;2;60;20;25m";
-    const BG_GREEN: &str = "\x1b[48;2;20;50;30m";
-    const BG_RESET: &str = "\x1b[49m";
-
-    // Collect all diff lines first so we know which is last
     let mut diff_lines: Vec<String> = Vec::new();
 
     for (group_idx, group) in groups.iter().enumerate() {
         if group_idx > 0 {
-            diff_lines.push(format!("    {C_DARK}├{C_RESET}  {C_DARK}⋯{C_RESET}"));
+            diff_lines.push(format!("    {dark}├{R}  {dark}⋯{R}"));
         }
 
         for op in group {
@@ -316,25 +322,25 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
                 let formatted = match change.tag() {
                     ChangeTag::Delete => {
                         format!(
-                            "    {C_DARK}├{C_RESET}{BG_RED} {C_LINE_NO}{line_no}{C_RESET}{BG_RED} {C_RED}- {change_trimmed}{C_RESET}{BG_RESET}"
+                            "    {dark}├{R}{bg_del} {line_no_c}{line_no}{R}{bg_del} {red}- {change_trimmed}{R}{BG_RESET}"
                         )
                     }
                     ChangeTag::Insert => {
                         let highlighted = hl
                             .as_mut()
                             .and_then(|h| h.highlight_line(change_trimmed))
-                            .unwrap_or_else(|| format!("{C_GREEN}{change_trimmed}{C_RESET}"));
+                            .unwrap_or_else(|| format!("{green}{change_trimmed}{R}"));
                         format!(
-                            "    {C_DARK}├{C_RESET}{BG_GREEN} {C_LINE_NO}{line_no}{C_RESET}{BG_GREEN} {C_GREEN}+ {C_RESET}{BG_GREEN}{highlighted}{BG_RESET}"
+                            "    {dark}├{R}{bg_add} {line_no_c}{line_no}{R}{bg_add} {green}+ {R}{bg_add}{highlighted}{BG_RESET}"
                         )
                     }
                     ChangeTag::Equal => {
                         let highlighted = hl
                             .as_mut()
                             .and_then(|h| h.highlight_line(change_trimmed))
-                            .unwrap_or_else(|| format!("{C_DARK}{change_trimmed}{C_RESET}"));
+                            .unwrap_or_else(|| format!("{dark}{change_trimmed}{R}"));
                         format!(
-                            "    {C_DARK}├{C_RESET} {C_LINE_NO}{line_no}{C_RESET}   {highlighted}"
+                            "    {dark}├{R} {line_no_c}{line_no}{R}   {highlighted}"
                         )
                     }
                 };
@@ -343,7 +349,6 @@ pub fn format_diff(diff: &DiffPreview) -> Vec<String> {
         }
     }
 
-    // Replace last ├ with └
     if let Some(last) = diff_lines.last_mut() {
         *last = last.replacen('├', "└", 1);
     }

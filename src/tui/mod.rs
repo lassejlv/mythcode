@@ -8,6 +8,7 @@ mod markdown;
 mod permission;
 mod render;
 mod select;
+pub mod theme;
 
 use std::io;
 use std::time::{Duration, Instant};

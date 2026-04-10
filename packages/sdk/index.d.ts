@@ -37,6 +37,10 @@ export interface MythcodeAPI {
   // Shell execution
   exec(command: string): Promise<ExecResult>;
 
+  // Theme
+  setTheme(colors: ThemeColors): void;
+  getTheme(): Promise<ThemeColors>;
+
   // State persistence
   state: StateAPI;
 
@@ -115,6 +119,24 @@ export interface ExecResult {
 export interface StateAPI {
   get<T = unknown>(key: string): Promise<T | undefined>;
   set(key: string, value: unknown): Promise<void>;
+}
+
+export interface ThemeColors {
+  accent?: string;
+  green?: string;
+  red?: string;
+  yellow?: string;
+  magenta?: string;
+  gray?: string;
+  dark?: string;
+  dot?: string;
+  codeFg?: string;
+  codeBg?: string;
+  header1?: string;
+  bullet?: string;
+  thinking?: string;
+  diffAddBg?: string;
+  diffDelBg?: string;
 }
 
 export interface Disposable {

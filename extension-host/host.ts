@@ -189,6 +189,13 @@ function createAPI(ext: ExtensionEntry): MythcodeAPI {
       return await sendRequest("action/exec", { command });
     },
 
+    setTheme(colors: Record<string, string>) {
+      sendRequest("action/setTheme", colors);
+    },
+    async getTheme(): Promise<Record<string, string>> {
+      return await sendRequest("action/getTheme");
+    },
+
     // State
     state: {
       async get<T = any>(key: string): Promise<T | undefined> {

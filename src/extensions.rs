@@ -371,6 +371,14 @@ async fn spawn_host(
                 "action/clearScreen" => {
                     let _ = event_tx_clone.send(AppEvent::ExtensionClearScreen);
                 }
+                "action/setTheme" => {
+                    if let Some(p) = params {
+                        if let Ok(overrides) = serde_json::from_value::<crate::tui::theme::ThemeOverride>(p.clone()) {
+                            crate::tui::theme::apply_override(&overrides);
+                        }
+                    }
+                    reply(Value::Bool(true));
+                }
                 "host/ready" => {
                     if let Some(tx) = ready_tx_clone.lock().await.take() {
                         let _ = tx.send(());
